@@ -1,0 +1,32 @@
+all:
+  hosts:
+    podman-alpine:
+      ansible_host: 127.0.0.1
+      ansible_port: 2222
+      ansible_user: rocannon
+      ansible_password: rocannon
+      ansible_become: true
+      ansible_become_password: rocannon
+      ansible_ssh_extra_args: "-o StrictHostKeyChecking=no"
+    podman-ubuntu:
+      ansible_host: 127.0.0.1
+      ansible_port: 2223
+      ansible_user: rocannon
+      ansible_password: rocannon
+      ansible_become: true
+      ansible_become_password: rocannon
+      ansible_ssh_extra_args: "-o StrictHostKeyChecking=no"
+    podman-rocky:
+      ansible_host: 127.0.0.1
+      ansible_port: 2224
+      ansible_user: rocannon
+      ansible_password: rocannon
+      ansible_become: true
+      ansible_become_password: rocannon
+      ansible_ssh_extra_args: "-o StrictHostKeyChecking=no"
+  children:
+    podman:
+      hosts:
+        podman-alpine:
+        podman-ubuntu:
+        podman-rocky:

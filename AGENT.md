@@ -106,6 +106,8 @@ Key things to validate on z/OS:
 - **`uv` only.** Never use `pip`, `python -m venv`, or `conda`. All commands go through `uv run`.
 - **Subprocess for Ansible CLI, in-process for ansible-runner.** This is a deliberate architecture decision — see ARCHITECTURE.md.
 - **Test with local models.** The LLM test suite uses Ollama with `ibm/granite4:micro`. No cloud APIs. This is intentional for air-gapped environments.
+- **You may run CLI tools.** You are permitted to run `podman`, `ollama`, `ansible`, `ssh`, and other system tools directly. The test infrastructure depends on them.
+- **Never author commits as the agent.** Do not add `Co-Authored-By`, `Signed-off-by`, or any other attribution to an AI agent in commit messages. Commits are authored by the user.
 
 ## File Map
 

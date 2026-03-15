@@ -1,0 +1,5 @@
+PYZ: "/usr/lpp/IBM/cyp/v3r13/pyz"
+PYZ_VERSION: "3.13"
+ZOAU: "/usr/lpp/IBM/zoautil"
+ZOAU_PYTHON_LIBRARY_PATH: "{{ ZOAU }}/lib/3.13"
+ansible_python_interpreter: "{{ PYZ }}/bin/python3.13"

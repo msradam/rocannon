@@ -38,7 +38,8 @@ class Config(BaseModel):
         return self
 
 
-def load_profile(path: Path) -> Config:
+def load_profile(path: Path, transport: str = "stdio") -> Config:
     """Load a YAML profile file into a Config object."""
     raw = yaml.safe_load(path.read_text())
+    raw.setdefault("transport", transport)
     return Config(**raw)

@@ -1,0 +1,18 @@
+FROM registry.access.redhat.com/ubi10/ubi-minimal:latest
+
+RUN microdnf install -y \
+    openssh-server \
+    python3 \
+    sudo \
+    passwd \
+    && microdnf clean all \
+    && ssh-keygen -A \
+    && sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config \
+    && sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config \
+    && echo "rocannon ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+RUN useradd -m -s /bin/bash rocannon \
+    && echo "rocannon:rocannon" | chpasswd
+
+EXPOSE 22
+CMD ["/usr/sbin/sshd", "-D", "-e"]

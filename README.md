@@ -81,7 +81,7 @@ uv run ansible -i inventories/zos.yml all -m ping
 ### 6. Start the server
 
 ```bash
-# stdio transport (for MCP clients like Claude Code)
+# stdio transport (for MCP clients)
 uv run rocannon serve --profile profiles/zos.yml
 
 # with debug logging

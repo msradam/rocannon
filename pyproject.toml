@@ -25,12 +25,49 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "mypy>=1.19.1",
+    "ollama>=0.6.1",
+    "pre-commit>=4.5.1",
+    "pytest>=8.0",
+    "pytest-asyncio>=1.0",
     "ruff>=0.15.5",
+    "types-pyyaml>=6.0.12.20250915",
+    "vulture>=2.15",
 ]
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+# --- Ruff ---
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+src = ["src"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W", "UP"]
+select = ["E", "W", "F", "I", "N", "UP", "B", "C4", "SIM", "S", "FURB"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S110", "S603", "S607"]
+"src/rocannon/schema.py" = ["S603", "S607"]
+"src/rocannon/inventory.py" = ["S603"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# --- Mypy ---
+[tool.mypy]
+python_version = "3.11"
+strict = true
+disallow_untyped_defs = true
+warn_return_any = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_reexport = true
+mypy_path = "src"
+
+# --- Vulture ---
+[tool.vulture]
+min_confidence = 80
+paths = ["src/", "tests/"]
+ignore_names = ["cls"]

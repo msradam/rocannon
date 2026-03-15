@@ -1,0 +1,18 @@
+FROM registry.suse.com/bci/bci-base:16.0
+
+RUN zypper -n install \
+    openssh-server \
+    python3 \
+    sudo \
+    shadow \
+    && zypper clean -a \
+    && ssh-keygen -A \
+    && printf 'PermitRootLogin yes\nPasswordAuthentication yes\n' \
+       > /etc/ssh/sshd_config.d/rocannon.conf \
+    && echo "rocannon ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+RUN useradd -m -s /bin/bash rocannon \
+    && echo "rocannon:rocannon" | chpasswd
+
+EXPOSE 22
+CMD ["/usr/sbin/sshd", "-D", "-e"]

@@ -8,7 +8,7 @@ from rocannon.server import create_server
 
 
 @click.group()
-def cli():
+def cli() -> None:
     """Rocannon — Ansible modules as MCP tools."""
 
 
@@ -52,7 +52,7 @@ def serve(
     profile: Path | None,
     transport: str,
     log_level: str,
-):
+) -> None:
     """Start the Rocannon MCP server."""
     logging.basicConfig(
         level=getattr(logging, log_level.upper()),
@@ -65,8 +65,7 @@ def serve(
         raise click.UsageError("--profile and --inventory/--modules are mutually exclusive.")
 
     if profile:
-        config = load_profile(profile)
-        config.transport = transport
+        config = load_profile(profile, transport=transport)
     elif has_flags:
         config = Config(
             inventories=list(inventories),
@@ -77,10 +76,10 @@ def serve(
         raise click.UsageError("Provide either --profile or at least --inventory and --modules.")
 
     server = create_server(config)
-    server.run(transport=transport)
+    server.run(transport=transport)  # type: ignore[arg-type]
 
 
-def main():
+def main() -> None:
     """CLI entrypoint."""
     cli()
 

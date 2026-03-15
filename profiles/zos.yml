@@ -1,0 +1,5 @@
+inventories:
+  - ./csrt.yml
+modules:
+  - ansible.builtin
+  - ibm.ibm_zos_core

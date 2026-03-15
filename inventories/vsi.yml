@@ -1,0 +1,32 @@
+################################################################################
+# VSI Cloud Instance Inventory
+################################################################################
+
+vsi_system:
+  hosts:
+    vsi01:
+      ansible_host: 52.118.117.201
+      
+  vars:
+    ansible_user: ibmuser
+    PYZ: "/usr/lpp/IBM/cyp/v3r13/pyz"
+    PYZ_VERSION: "3.13"
+    ZOAU: "/usr/lpp/IBM/zoautil"
+    ansible_python_interpreter: "{{ PYZ }}/bin/python3.13"
+    ansible_pipelining: true
+    ansible_scp_extra_args: "-O"
+    host_key_checking: False
+    environment_vars:
+        _BPXK_AUTOCVT: "ON"
+        ZOAU_HOME: "{{ ZOAU }}"
+        PYTHONPATH: "{{ ZOAU }}/lib/{{ PYZ_VERSION }}"
+        LIBPATH: "{{ ZOAU }}/lib:{{ PYZ }}/lib:/lib:/usr/lib:."
+        PATH: "{{ ZOAU }}/bin:{{ PYZ }}/bin:/bin:/var/bin:/usr/sbin"
+        _CEE_RUNOPTS: "FILETAG(AUTOCVT,AUTOTAG) POSIX(ON)"
+        _TAG_REDIR_ERR: "txt"
+        _TAG_REDIR_IN: "txt"
+        _TAG_REDIR_OUT: "txt"
+        _ENCODE_FILE_NEW: "IBM-1047"
+        _ENCODE_FILE_EXISTING: "IBM-1047"
+        LANG: "C"
+        PYTHONSTDINENCODING: "cp1047"

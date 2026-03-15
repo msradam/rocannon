@@ -1,0 +1,53 @@
+################################################################################
+# © Copyright IBM Corporation 2020
+################################################################################
+
+source_system:
+  hosts:
+    cb8a:
+      ansible_host: cb8a.pok.stglabs.ibm.com
+      
+    cb8b:
+      ansible_host: cb8b.pok.stglabs.ibm.com
+
+    cb8c:
+      ansible_host: cb8c.pok.stglabs.ibm.com
+
+    cb8d:
+      ansible_host: cb8d.pok.stglabs.ibm.com
+    
+    cb8e:
+      ansible_host: cb8e.pok.stglabs.ibm.com
+    
+    cb86:
+      ansible_host: cb86.pok.stglabs.ibm.com
+
+    cb88:
+      ansible_host: cb88.pok.stglabs.ibm.com  
+
+    cb89:
+      ansible_host: cb89.pok.stglabs.ibm.com
+
+  vars:
+    ansible_user: rahman
+    PYZ: "/global/pyz/v3r12"
+    PYZ_VERSION: "3.12"
+    ZOAU: "/global/zoau/1.3"
+    ansible_python_interpreter: "{{ PYZ }}/bin/python3"
+    ansible_pipelining: true
+    ansible_scp_extra_args: "-O"
+    host_key_checking: False
+    environment_vars:
+        _BPXK_AUTOCVT: "ON"
+        ZOAU_HOME: "{{ ZOAU }}"
+        PYTHONPATH: "{{ ZOAU }}/lib/{{ PYZ_VERSION }}"
+        LIBPATH: "{{ ZOAU }}/lib:{{ PYZ }}/lib:/lib:/usr/lib:."
+        PATH: "{{ ZOAU }}/bin:{{ PYZ }}/bin:/bin:/var/bin:/usr/sbin"
+        _CEE_RUNOPTS: "FILETAG(AUTOCVT,AUTOTAG) POSIX(ON)"
+        _TAG_REDIR_ERR: "txt"
+        _TAG_REDIR_IN: "txt"
+        _TAG_REDIR_OUT: "txt"
+        _ENCODE_FILE_NEW: "IBM-1047"
+        _ENCODE_FILE_EXISTING: "IBM-1047"
+        LANG: "C"
+        PYTHONSTDINENCODING: "cp1047"

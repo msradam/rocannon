@@ -5,6 +5,25 @@ from typing import Any
 
 logger = logging.getLogger("rocannon.schema")
 
+ANSIBLE_TYPE_MAP: dict[str, type] = {
+    "str": str,
+    "string": str,
+    "int": int,
+    "integer": int,
+    "float": float,
+    "bool": bool,
+    "boolean": bool,
+    "list": list,
+    "dict": dict,
+    "path": str,
+    "raw": str,
+    "jsonarg": str,
+    "json": str,
+    "bytes": str,
+    "bits": str,
+    "sid": str,
+}
+
 
 def expand_modules(specs: list[str]) -> list[str]:
     """Expand module/collection/namespace specs into fully-qualified module names."""
@@ -65,7 +84,7 @@ def fetch_module_schema(module_name: str) -> dict[str, Any]:
     return _parse_module_doc(module_name, doc[module_name])
 
 
-def _parse_module_doc(module_name: str, module_doc: dict) -> dict[str, Any]:
+def _parse_module_doc(module_name: str, module_doc: dict[str, Any]) -> dict[str, Any]:
     """Convert ansible-doc output into a structured schema dict."""
     doc_entry = module_doc.get("doc", {})
     description = doc_entry.get("short_description", module_name)
@@ -85,7 +104,7 @@ def _parse_module_doc(module_name: str, module_doc: dict) -> dict[str, Any]:
     }
 
 
-def _parse_parameter(param_name: str, param_info: dict) -> dict[str, Any]:
+def _parse_parameter(param_name: str, param_info: dict[str, Any]) -> dict[str, Any]:
     """Parse a single parameter from ansible-doc options."""
     desc = _flatten_description(param_info.get("description", ""))
 
@@ -119,7 +138,7 @@ def _parse_parameter(param_name: str, param_info: dict) -> dict[str, Any]:
     return param
 
 
-def _describe_suboptions(suboptions: dict) -> str:
+def _describe_suboptions(suboptions: dict[str, Any]) -> str:
     """Flatten suboptions into a human-readable string for tool descriptions."""
     parts = []
     for name, info in suboptions.items():

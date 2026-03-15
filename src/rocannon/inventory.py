@@ -1,39 +1,39 @@
+import json
+import logging
+import subprocess
 from pathlib import Path
 
-import yaml
+logger = logging.getLogger("rocannon.inventory")
 
 
-def load_inventories(paths: list[Path]) -> dict[str, dict]:
-    """Load and merge multiple Ansible inventory files into a host-vars dict."""
-    merged_hosts: dict[str, dict] = {}
-    for path in paths:
-        raw = yaml.safe_load(path.read_text())
-        if not raw:
-            continue
-        _extract_hosts(raw, merged_hosts)
-    return merged_hosts
+def load_inventory(paths: list[Path]) -> dict[str, list[str]]:
+    """Query ansible-inventory for hosts and groups.
 
+    Returns a dict with 'hosts' (list of hostnames) and 'groups' (list of group names).
+    Delegates all inventory parsing, group_vars, Jinja2 resolution, etc. to Ansible.
 
-def _extract_hosts(data: dict, hosts: dict[str, dict]) -> None:
-    """Recursively extract hosts from inventory group structure."""
-    if not isinstance(data, dict):
-        return
+    Uses subprocess rather than Python API because Ansible's internal import machinery
+    (FileFinder hook check in _collection_finder.py) is incompatible with FastMCP
+    in the same process.
+    """
+    cmd = ["ansible-inventory", "--list"]
+    for p in paths:
+        cmd.extend(["-i", str(p)])
 
-    if "hosts" in data and isinstance(data["hosts"], dict):
-        for hostname, hostvars in data["hosts"].items():
-            hosts[hostname] = hostvars or {}
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        logger.error("ansible-inventory failed: %s", result.stderr.strip())
+        return {"hosts": [], "groups": []}
 
-    if "children" in data and isinstance(data["children"], dict):
-        for _group_name, group_data in data["children"].items():
-            _extract_hosts(group_data, hosts)
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        logger.error("Failed to parse ansible-inventory output: %s", exc)
+        return {"hosts": [], "groups": []}
 
-    for key, value in data.items():
-        if key in ("hosts", "children"):
-            continue
-        if isinstance(value, dict):
-            _extract_hosts(value, hosts)
+    hosts = sorted(data.get("_meta", {}).get("hostvars", {}).keys())
+    groups = sorted(
+        k for k in data if k not in ("_meta", "all", "ungrouped") and data[k].get("hosts")
+    )
 
-
-def get_valid_hosts(hosts: dict[str, dict]) -> set[str]:
-    """Return the set of valid host names from merged inventory."""
-    return set(hosts.keys())
+    return {"hosts": hosts, "groups": groups}

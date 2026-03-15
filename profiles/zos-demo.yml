@@ -1,0 +1,11 @@
+# z/OS Demo Profile
+# Uses csrt.yml inventory with IBM z/OS collections
+
+inventories:
+  - ./csrt.yml
+
+modules:
+  # - ansible.builtin
+  - ibm.ibm_zos_core
+
+# Made with Bob

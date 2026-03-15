@@ -1,8 +1,11 @@
-import json
+import contextlib
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
-import ansible_runner
+import ansible_runner  # type: ignore[import-untyped]
+import yaml
 
 
 def run_module(
@@ -12,22 +15,34 @@ def run_module(
     host_pattern: str,
 ) -> dict[str, Any]:
     """Execute an Ansible module via ansible-runner and return structured results."""
-    args = dict(module_args)
-    free_form = args.pop("_raw_params", None) or args.pop("cmd", None)
+    abs_inventory = []
+    for inv_path in inventory:
+        p = Path(inv_path)
+        if not p.is_absolute():
+            p = Path.cwd() / p
+        abs_inventory.append(str(p))
 
-    if free_form and not args:
-        args_str = str(free_form)
-    else:
-        if free_form:
-            args["_raw_params"] = free_form
-        args_str = json.dumps(args) if args else ""
+    # environment_vars is resolved from inventory by Ansible at runtime
+    play: dict[str, Any] = {
+        "hosts": host_pattern,
+        "gather_facts": False,
+        "environment": "{{ environment_vars | default({}) }}",
+        "tasks": [
+            {
+                "name": f"Execute {module}",
+                module: module_args or {},
+            }
+        ],
+    }
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+        yaml.dump([play], f)
+        playbook_path = f.name
 
     try:
         runner = ansible_runner.run(
-            module=module,
-            module_args=args_str,
-            inventory=inventory,
-            host_pattern=host_pattern,
+            playbook=playbook_path,
+            inventory=abs_inventory,
             quiet=True,
         )
     except Exception as exc:
@@ -38,6 +53,9 @@ def run_module(
             "stdout": "",
             "stderr": str(exc),
         }
+    finally:
+        with contextlib.suppress(Exception):
+            os.unlink(playbook_path)
 
     return _parse_runner_result(runner)
 
@@ -47,24 +65,41 @@ def build_inventory_list(inventory_paths: list[Path]) -> list[str]:
     return [str(p) for p in inventory_paths]
 
 
-def _parse_runner_result(runner: ansible_runner.Runner) -> dict[str, Any]:
-    """Extract structured result from ansible-runner events."""
+def _parse_runner_result(runner: Any) -> dict[str, Any]:
+    """Extract structured results from ansible-runner events.
+
+    Collects results from all hosts. Returns a single-host format when only
+    one host responded, and a per-host format when multiple hosts responded.
+    """
+    host_results: dict[str, dict[str, Any]] = {}
+
     for event in runner.events:
         event_data = event.get("event_data", {})
         res = event_data.get("res")
-        if res is not None:
-            return {
-                "status": runner.status,
+        host = event_data.get("host")
+        if res is not None and host is not None:
+            host_results[host] = {
                 "changed": res.get("changed", False),
                 "result": res,
                 "stdout": res.get("stdout", ""),
                 "stderr": res.get("stderr", ""),
             }
 
+    if not host_results:
+        return {
+            "status": runner.status,
+            "changed": False,
+            "result": {},
+            "stdout": runner.stdout.read() if runner.stdout else "",
+            "stderr": runner.stderr.read() if runner.stderr else "",
+        }
+
+    if len(host_results) == 1:
+        host_data = next(iter(host_results.values()))
+        return {"status": runner.status, **host_data}
+
     return {
         "status": runner.status,
-        "changed": False,
-        "result": {},
-        "stdout": runner.stdout.read() if runner.stdout else "",
-        "stderr": runner.stderr.read() if runner.stderr else "",
+        "changed": any(h["changed"] for h in host_results.values()),
+        "hosts": host_results,
     }

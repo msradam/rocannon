@@ -7,7 +7,7 @@ Two test profiles:
   - linuxone: ansible.builtin tools against enterprise Linux containers (RHEL, SLES, Ubuntu)
   - zos:      ansible.builtin + ibm.ibm_zos_core tools against z/OS LPARs (schema-only)
 
-Container lifecycle is managed by conftest.py fixtures (build, start, teardown).
+Container and Ollama lifecycle is managed by conftest.py fixtures.
 
 Usage:
     uv run pytest tests/test_llm.py -v                   # all tests
@@ -28,8 +28,6 @@ from rocannon.config import Config
 from rocannon.server import create_server
 
 logger = logging.getLogger("rocannon.test_llm")
-
-MODEL = "ibm/granite4:micro"
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -62,7 +60,7 @@ ZOS_MODULES = [
 
 
 @pytest.fixture(scope="session")
-def linuxone_server(podman_inventory):
+def linuxone_server(podman_inventory: Path) -> Any:
     """Create MCP server backed by enterprise Linux containers (RHEL, SLES, Ubuntu).
 
     Container lifecycle (build, start, teardown) is handled by the
@@ -73,7 +71,7 @@ def linuxone_server(podman_inventory):
 
 
 @pytest.fixture(scope="module")
-def zos_server():
+def zos_server() -> Any:
     if not ZOS_INVENTORY.exists():
         pytest.skip(f"z/OS inventory not found: {ZOS_INVENTORY}")
     config = Config(inventories=[ZOS_INVENTORY], modules=ZOS_MODULES)
@@ -85,14 +83,14 @@ def zos_server():
 # ---------------------------------------------------------------------------
 
 
-def mcp_tools_to_ollama(tools: list) -> tuple[list[dict], dict[str, dict]]:
+def mcp_tools_to_ollama(tools: list[Any]) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     """Convert MCP tool list to Ollama tool format.
 
     Returns (ollama_tools, schema_map) where schema_map maps
     tool names to their MCP input schemas for argument validation.
     """
-    ollama_tools = []
-    schema_map = {}
+    ollama_tools: list[dict[str, Any]] = []
+    schema_map: dict[str, dict[str, Any]] = {}
 
     for t in tools:
         schema = t.inputSchema
@@ -114,7 +112,8 @@ def mcp_tools_to_ollama(tools: list) -> tuple[list[dict], dict[str, dict]]:
 
 async def run_agent_loop(
     mcp_client: Client,
-    ollama_tools: list[dict],
+    ollama_tools: list[dict[str, Any]],
+    model: str,
     prompt: str,
     max_turns: int = 5,
 ) -> dict[str, Any]:
@@ -125,13 +124,13 @@ async def run_agent_loop(
       - final_response: the model's final text answer
       - raw_results: list of raw tool call results
     """
-    messages = [{"role": "user", "content": prompt}]
-    tool_calls_made = []
-    raw_results = []
+    messages: list[dict[str, Any]] = [{"role": "user", "content": prompt}]
+    tool_calls_made: list[tuple[str, dict[str, Any]]] = []
+    raw_results: list[str] = []
 
     for _turn in range(max_turns):
         response = ollama.chat(
-            model=MODEL,
+            model=model,
             messages=messages,
             tools=ollama_tools,
             options={"temperature": 0, "num_ctx": 16384},
@@ -176,7 +175,7 @@ class TestLinuxOneLive:
     """Live tests against enterprise Linux containers via LLM tool calling."""
 
     @pytest.mark.asyncio
-    async def test_ping_single_host(self, linuxone_server):
+    async def test_ping_single_host(self, linuxone_server: Any, ollama_model: str) -> None:
         """LLM should pick ansible.builtin.ping and target a specific host."""
         async with Client(linuxone_server) as mcp_client:
             tools = await mcp_client.list_tools()
@@ -185,6 +184,7 @@ class TestLinuxOneLive:
             result = await run_agent_loop(
                 mcp_client,
                 ollama_tools,
+                ollama_model,
                 "Ping the linuxone-ubuntu host to check if it's reachable.",
             )
 
@@ -197,7 +197,7 @@ class TestLinuxOneLive:
             assert data["status"] == "successful"
 
     @pytest.mark.asyncio
-    async def test_ping_group(self, linuxone_server):
+    async def test_ping_group(self, linuxone_server: Any, ollama_model: str) -> None:
         """LLM should ping an entire group."""
         async with Client(linuxone_server) as mcp_client:
             tools = await mcp_client.list_tools()
@@ -206,6 +206,7 @@ class TestLinuxOneLive:
             result = await run_agent_loop(
                 mcp_client,
                 ollama_tools,
+                ollama_model,
                 "Ping all hosts in the linuxone group.",
             )
 
@@ -215,7 +216,7 @@ class TestLinuxOneLive:
             assert args["target"] == "linuxone"
 
     @pytest.mark.asyncio
-    async def test_gather_os_info(self, linuxone_server):
+    async def test_gather_os_info(self, linuxone_server: Any, ollama_model: str) -> None:
         """LLM should use command or setup to identify the OS."""
         async with Client(linuxone_server) as mcp_client:
             tools = await mcp_client.list_tools()
@@ -224,6 +225,7 @@ class TestLinuxOneLive:
             result = await run_agent_loop(
                 mcp_client,
                 ollama_tools,
+                ollama_model,
                 "What operating system is running on linuxone-rhel? Use a command to check.",
             )
 
@@ -236,7 +238,7 @@ class TestLinuxOneLive:
             )
 
     @pytest.mark.asyncio
-    async def test_file_lifecycle(self, linuxone_server):
+    async def test_file_lifecycle(self, linuxone_server: Any, ollama_model: str) -> None:
         """LLM should create a file, verify it exists, then remove it."""
         async with Client(linuxone_server) as mcp_client:
             tools = await mcp_client.list_tools()
@@ -245,6 +247,7 @@ class TestLinuxOneLive:
             result = await run_agent_loop(
                 mcp_client,
                 ollama_tools,
+                ollama_model,
                 "On linuxone-sles: "
                 "1) Create the file /tmp/rocannon-test.txt with content 'hello from rocannon'. "
                 "2) Verify the file exists using stat. "
@@ -255,7 +258,6 @@ class TestLinuxOneLive:
 
             tool_names = [tc[0] for tc in result["tool_calls"]]
             assert len(result["tool_calls"]) >= 2, f"Expected >=2 tool calls, got {tool_names}"
-            # Must at least create and verify — delete is a bonus for a 2B model
             assert "ansible.builtin.copy" in tool_names or "ansible.builtin.shell" in tool_names, (
                 f"Expected a create operation, got {tool_names}"
             )
@@ -264,7 +266,7 @@ class TestLinuxOneLive:
             )
 
     @pytest.mark.asyncio
-    async def test_multi_host_command(self, linuxone_server):
+    async def test_multi_host_command(self, linuxone_server: Any, ollama_model: str) -> None:
         """LLM should run a command across multiple hosts."""
         async with Client(linuxone_server) as mcp_client:
             tools = await mcp_client.list_tools()
@@ -273,6 +275,7 @@ class TestLinuxOneLive:
             result = await run_agent_loop(
                 mcp_client,
                 ollama_tools,
+                ollama_model,
                 "Run 'hostname' on all linuxone hosts using the command module.",
             )
 
@@ -295,7 +298,7 @@ class TestZosSchema:
     """
 
     @pytest.mark.asyncio
-    async def test_zos_tool_registration(self, zos_server):
+    async def test_zos_tool_registration(self, zos_server: Any) -> None:
         """All z/OS modules should register as tools."""
         async with Client(zos_server) as mcp_client:
             tools = await mcp_client.list_tools()
@@ -309,14 +312,14 @@ class TestZosSchema:
             assert "ansible.builtin.command" in tool_names
 
     @pytest.mark.asyncio
-    async def test_zos_ping_tool_selection(self, zos_server):
+    async def test_zos_ping_tool_selection(self, zos_server: Any, ollama_model: str) -> None:
         """LLM should choose zos_ping (not builtin ping) for z/OS connectivity check."""
         async with Client(zos_server) as mcp_client:
             tools = await mcp_client.list_tools()
             ollama_tools, _ = mcp_tools_to_ollama(tools)
 
             response = ollama.chat(
-                model=MODEL,
+                model=ollama_model,
                 messages=[
                     {
                         "role": "user",
@@ -334,14 +337,14 @@ class TestZosSchema:
             assert tc.function.arguments["target"] == "cb8a"
 
     @pytest.mark.asyncio
-    async def test_zos_dataset_tool_selection(self, zos_server):
+    async def test_zos_dataset_tool_selection(self, zos_server: Any, ollama_model: str) -> None:
         """LLM should use zos_data_set to create a dataset."""
         async with Client(zos_server) as mcp_client:
             tools = await mcp_client.list_tools()
             ollama_tools, _ = mcp_tools_to_ollama(tools)
 
             response = ollama.chat(
-                model=MODEL,
+                model=ollama_model,
                 messages=[
                     {
                         "role": "user",
@@ -361,14 +364,14 @@ class TestZosSchema:
             assert tc.function.arguments["target"] == "cb8a"
 
     @pytest.mark.asyncio
-    async def test_zos_job_submit_selection(self, zos_server):
+    async def test_zos_job_submit_selection(self, zos_server: Any, ollama_model: str) -> None:
         """LLM should use zos_job_submit for JCL submission."""
         async with Client(zos_server) as mcp_client:
             tools = await mcp_client.list_tools()
             ollama_tools, _ = mcp_tools_to_ollama(tools)
 
             response = ollama.chat(
-                model=MODEL,
+                model=ollama_model,
                 messages=[
                     {
                         "role": "user",
@@ -387,14 +390,14 @@ class TestZosSchema:
             assert tc.function.arguments["target"] == "cb86"
 
     @pytest.mark.asyncio
-    async def test_zos_copy_selection(self, zos_server):
+    async def test_zos_copy_selection(self, zos_server: Any, ollama_model: str) -> None:
         """LLM should prefer zos_copy over builtin copy for z/OS file operations."""
         async with Client(zos_server) as mcp_client:
             tools = await mcp_client.list_tools()
             ollama_tools, _ = mcp_tools_to_ollama(tools)
 
             response = ollama.chat(
-                model=MODEL,
+                model=ollama_model,
                 messages=[
                     {
                         "role": "user",
@@ -412,7 +415,7 @@ class TestZosSchema:
             assert tc.function.name == "ibm.ibm_zos_core.zos_copy"
 
     @pytest.mark.asyncio
-    async def test_zos_inventory_targets(self, zos_server):
+    async def test_zos_inventory_targets(self, zos_server: Any) -> None:
         """Verify that z/OS hosts and groups are available as targets."""
         async with Client(zos_server) as mcp_client:
             tools = await mcp_client.list_tools()
@@ -420,4 +423,4 @@ class TestZosSchema:
             target_enum = ping_tool.inputSchema["properties"]["target"].get("enum", [])
             assert "cb8a" in target_enum
             assert "cb86" in target_enum
-            assert "source_system" in target_enum  # group name
+            assert "source_system" in target_enum

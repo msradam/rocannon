@@ -1,11 +1,19 @@
 """Pytest fixtures for Rocannon integration tests.
 
-Manages test containers (RHEL 10, SLES 16, Ubuntu 24.04) with SSH + Python,
-matching the enterprise Linux distros supported on IBM LinuxONE (s390x).
+Manages two pieces of infrastructure:
+
+1. Test containers (RHEL 10, SLES 16, Ubuntu 24.04) with SSH + Python,
+   matching the enterprise Linux distros supported on IBM LinuxONE (s390x).
+2. Ollama server and model lifecycle — starts the server if not running,
+   pulls the model if not present, skips if Ollama is not installed.
 
 Container lifecycle:
   session start → build images → start containers → generate inventory
   session end   → stop and remove containers
+
+Ollama lifecycle:
+  session start → start server (if needed) → pull model (if needed)
+  session end   → stop server (only if we started it)
 """
 
 import shutil
@@ -17,6 +25,9 @@ from typing import Any
 
 import pytest
 import yaml
+
+OLLAMA_MODEL = "ibm/granite4:micro"
+OLLAMA_STARTUP_TIMEOUT = 30
 
 CONTAINERS_DIR = Path(__file__).parent / "containers"
 
@@ -156,15 +167,18 @@ def container_runtime() -> str:
 def podman_containers(container_runtime: str) -> Generator[dict[str, Any], None, None]:
     """Build, start, and yield test containers. Tear down at session end.
 
-    Skips all tests if no container runtime is available.
+    Skips if the container runtime is not usable (e.g. podman machine not running).
     """
     runtime = container_runtime
 
-    for _name, (containerfile, tag, _) in CONTAINER_DEFS.items():
-        _build_image(runtime, containerfile, tag)
+    try:
+        for _name, (containerfile, tag, _) in CONTAINER_DEFS.items():
+            _build_image(runtime, containerfile, tag)
 
-    for name, (_, tag, port) in CONTAINER_DEFS.items():
-        _start_container(runtime, name, tag, port)
+        for name, (_, tag, port) in CONTAINER_DEFS.items():
+            _start_container(runtime, name, tag, port)
+    except (subprocess.CalledProcessError, TimeoutError) as exc:
+        pytest.skip(f"Container runtime not usable: {exc}")
 
     yield CONTAINER_DEFS
 
@@ -182,3 +196,75 @@ def podman_inventory(
     inv_path = inv_dir / "podman.yml"
     _generate_inventory(inv_path)
     return inv_path
+
+
+# ---------------------------------------------------------------------------
+# Ollama fixtures
+# ---------------------------------------------------------------------------
+
+
+def _ollama_is_running() -> bool:
+    """Check if the Ollama server is responding."""
+    import ollama
+
+    try:
+        ollama.list()
+        return True
+    except Exception:
+        return False
+
+
+def _start_ollama() -> subprocess.Popen[str]:
+    """Start the Ollama server as a background process."""
+    proc = subprocess.Popen(
+        ["ollama", "serve"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    deadline = time.time() + OLLAMA_STARTUP_TIMEOUT
+    while time.time() < deadline:
+        if _ollama_is_running():
+            return proc
+        time.sleep(0.5)
+
+    proc.kill()
+    raise TimeoutError(f"Ollama server did not start within {OLLAMA_STARTUP_TIMEOUT}s")
+
+
+def _ensure_model(model: str) -> None:
+    """Pull the model if not already available."""
+    import ollama
+
+    for m in ollama.list().models:
+        if m.model == model or m.model.startswith(model.split(":")[0]):
+            return
+
+    ollama.pull(model)
+
+
+@pytest.fixture(scope="session")
+def ollama_model() -> Generator[str, None, None]:
+    """Ensure Ollama is running and the test model is available.
+
+    Starts the Ollama server if not already running, pulls the model if not
+    present. Stops the server at session end only if this fixture started it.
+    Skips all dependent tests if Ollama is not installed.
+    """
+    if not shutil.which("ollama"):
+        pytest.skip("ollama not installed")
+
+    we_started_it = False
+    proc: subprocess.Popen[str] | None = None
+
+    if not _ollama_is_running():
+        proc = _start_ollama()
+        we_started_it = True
+
+    _ensure_model(OLLAMA_MODEL)
+
+    yield OLLAMA_MODEL
+
+    if we_started_it and proc is not None:
+        proc.terminate()
+        proc.wait(timeout=10)

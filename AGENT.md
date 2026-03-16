@@ -144,6 +144,41 @@ tests/
     └── Containerfile.ubuntu  # Ubuntu Server 24.04
 ```
 
+## z/OS Collection Compatibility Matrix
+
+The `ibm.ibm_zos_core` collection has strict version dependencies. Before testing against z/OS, confirm that the versions on your controller and managed nodes line up.
+
+| Collection | ansible-core | ZOAU | z/OS | Python (controller) | Python (z/OS) |
+|---|---|---|---|---|---|
+| 1.16.x | >=2.16 | >=1.3.6, <1.4.0 | V2R5–V3Rx | 3.10–3.12 | 3.11–3.12 |
+| 1.15.x | >=2.15 | >=1.3.5, <1.4.0 | V2R5–V3Rx | 3.9–3.12 | 3.11–3.12 |
+| 1.14.x | >=2.15 | >=1.3.4, <1.4.0 | V2R5–V3Rx | 3.9–3.12 | 3.11–3.12 |
+| 1.13.x | >=2.15 | >=1.3.3, <1.4.0 | V2R5–V3Rx | 3.9–3.12 | 3.11–3.12 |
+| 1.12.x | >=2.15 | >=1.3.2, <1.4.0 | V2R5–V3Rx | 3.9–3.12 | 3.10–3.12 |
+| 1.11.x | >=2.15 | >=1.3.1, <1.4.0 | V2R4–V2Rx | 3.9–3.12 | 3.10–3.12 |
+| 1.10.x | >=2.15 | >=1.3.0, <1.4.0 | V2R4–V2Rx | 3.9–3.12 | 3.10–3.12 |
+
+Python on z/OS must be **IBM Open Enterprise SDK for Python** — not stock CPython. Controller Python versions follow the ansible-core support matrix.
+
+### If versions don't match
+
+You have two options:
+
+1. **Downgrade the collection on the controller.** Install an older version that matches the ZOAU/Python on your z/OS system:
+   ```bash
+   uv run ansible-galaxy collection install ibm.ibm_zos_core:==1.13.0 --force
+   ```
+
+2. **Point the inventory at different ZOAU/Python paths.** If the z/OS system has multiple ZOAU or Python installations, specify them in inventory `host_vars`:
+   ```yaml
+   ansible_python_interpreter: /allpython/3.12/usr/lpp/IBM/cyp/v3r12/pyz/bin/python3
+   environment_vars:
+     PYZ: /allpython/3.12/usr/lpp/IBM/cyp/v3r12/pyz
+     ZOAU: /usr/lpp/IBM/zoau/v1.3.6
+   ```
+
+After either change, restart the Rocannon server — it reads `ansible-doc` at startup, so it will pick up the new collection version's module schemas automatically.
+
 ## Next Steps
 
 Priority order for z/OS validation:

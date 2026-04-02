@@ -15,5 +15,24 @@ repos:
           - click>=8.1.0
           - pyyaml>=6.0.3
           - types-PyYAML
+          - fastmcp>=3.1.0
+          - starlette>=0.45.0
         pass_filenames: false
         args: [src/rocannon]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+      - id: no-commit-to-branch
+        args: ["--branch", "main"]
+      - id: detect-private-key
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.2
+    hooks:
+      - id: gitleaks

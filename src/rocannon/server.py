@@ -4,12 +4,16 @@ import json
 import keyword
 import logging
 import re as _re
+import time
 from typing import Annotated, Any, Literal
 
 from fastmcp import FastMCP
 from fastmcp.dependencies import CurrentContext
 from fastmcp.server.context import Context
+from fastmcp.server.middleware import Middleware, MiddlewareContext
 from pydantic import Field
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from rocannon.config import Config
 from rocannon.executor import build_inventory_list, run_module
@@ -37,15 +41,51 @@ Prefer specific modules (e.g. `ansible_builtin_copy`, `ansible_builtin_file`) ov
 """
 
 
+class _AuditMiddleware(Middleware):
+    """Emit a structured JSON audit record for every tool call."""
+
+    async def on_call_tool(self, context: MiddlewareContext, call_next: Any) -> Any:
+        start = time.monotonic()
+        tool_name: str = getattr(context.message, "name", "unknown")
+        tool_params: dict[str, Any] = dict(getattr(context.message, "arguments", {}) or {})
+        target = tool_params.get("target", "unknown")
+
+        result = await call_next(context)
+
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        audit_logger.info(
+            json.dumps(
+                {
+                    "tool": tool_name,
+                    "target": target,
+                    "latency_ms": elapsed_ms,
+                    "status": "ok",
+                },
+                default=str,
+            )
+        )
+        return result
+
+
+audit_logger = logging.getLogger("rocannon.audit")
+
+
 def create_server(config: Config) -> FastMCP:
     """Build a FastMCP server with one tool per Ansible module."""
     mcp = FastMCP(
         "rocannon",
         instructions=SERVER_INSTRUCTIONS,
     )
+    mcp.add_middleware(_AuditMiddleware())
 
     inv = load_inventory(config.inventories)
     inventory_list = build_inventory_list(config.inventories)
+
+    if not inv["hosts"] and not inv["groups"]:
+        raise ValueError(
+            "Inventory resolved to zero hosts and groups. "
+            "Check that inventory files are readable and contain valid hosts."
+        )
 
     logger.info(
         "Inventory: %d hosts, %d groups from %d files",
@@ -78,6 +118,23 @@ def create_server(config: Config) -> FastMCP:
         registered,
         failed,
     )
+
+    if registered == 0:
+        raise ValueError(
+            "No tools registered. Check that the specified modules are installed "
+            "and accessible via ansible-doc."
+        )
+
+    @mcp.custom_route("/health", methods=["GET"])
+    async def health(_request: Request) -> JSONResponse:
+        return JSONResponse(
+            {
+                "status": "ok",
+                "tools": registered,
+                "hosts": len(inv["hosts"]),
+                "groups": len(inv["groups"]),
+            }
+        )
 
     return mcp
 

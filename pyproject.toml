@@ -3,10 +3,26 @@ name = "rocannon"
 version = "0.3.0"
 description = "Ansible modules as MCP tools"
 readme = "README.md"
+license = "MIT"
 authors = [
     { name = "Adam Munawar Rahman", email = "msrahmanadam@gmail.com" }
 ]
 requires-python = ">=3.11"
+keywords = ["ansible", "mcp", "model-context-protocol", "automation", "infrastructure", "zos", "ibm"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Utilities",
+    "Typing :: Typed",
+]
+
 dependencies = [
     "ansible-core>=2.19.7",
     "ansible-runner>=2.4.2",
@@ -15,6 +31,11 @@ dependencies = [
     "pydantic>=2.12.5",
     "pyyaml>=6.0.3",
 ]
+
+[project.urls]
+Homepage = "https://github.com/msradam/rocannon"
+Repository = "https://github.com/msradam/rocannon"
+Issues = "https://github.com/msradam/rocannon/issues"
 
 [project.scripts]
 rocannon = "rocannon.cli:main"
@@ -33,6 +54,7 @@ dev = [
     "ruff>=0.15.5",
     "types-pyyaml>=6.0.12.20250915",
     "vulture>=2.15",
+    "xenon>=0.9.3",
 ]
 
 [tool.pytest.ini_options]
@@ -69,5 +91,5 @@ mypy_path = "src"
 # --- Vulture ---
 [tool.vulture]
 min_confidence = 80
-paths = ["src/", "tests/"]
+paths = ["src/", "tests/", "vulture_whitelist.py"]
 ignore_names = ["cls"]

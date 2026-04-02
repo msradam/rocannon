@@ -30,7 +30,7 @@ else
 fi
 
 step=0
-total=5
+total=6
 
 step=$((step + 1))
 echo "[$step/$total] ruff format --check $dirs"
@@ -47,6 +47,10 @@ $run mypy $src_dirs
 step=$((step + 1))
 echo "[$step/$total] vulture"
 $run vulture
+
+step=$((step + 1))
+echo "[$step/$total] xenon (complexity)"
+$run xenon $src_dirs --max-absolute B --max-modules B --max-average A
 
 step=$((step + 1))
 echo "[$step/$total] pytest -x -q"

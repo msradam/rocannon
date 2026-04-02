@@ -7,12 +7,17 @@ from typing import Any
 import ansible_runner  # type: ignore[import-untyped]
 import yaml
 
+DEFAULT_TIMEOUT = 300
+DEFAULT_IDLE_TIMEOUT = 60
+
 
 def run_module(
     module: str,
     module_args: dict[str, Any],
     inventory: list[str],
     host_pattern: str,
+    timeout: int = DEFAULT_TIMEOUT,
+    idle_timeout: int = DEFAULT_IDLE_TIMEOUT,
 ) -> dict[str, Any]:
     """Execute an Ansible module via ansible-runner and return structured results."""
     abs_inventory = []
@@ -44,6 +49,8 @@ def run_module(
             playbook=playbook_path,
             inventory=abs_inventory,
             quiet=True,
+            timeout=timeout,
+            settings={"idle_timeout": idle_timeout},
         )
     except Exception as exc:
         return {

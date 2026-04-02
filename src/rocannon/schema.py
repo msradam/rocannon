@@ -39,13 +39,17 @@ def expand_modules(specs: list[str]) -> list[str]:
     if not prefixes:
         return explicit
 
-    result = subprocess.run(
-        ["ansible-doc", "--list", "--type", "module", "-j"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    all_modules = json.loads(result.stdout)
+    try:
+        result = subprocess.run(
+            ["ansible-doc", "--list", "--type", "module", "-j"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        all_modules = json.loads(result.stdout)
+    except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+        logger.error("ansible-doc --list failed: %s — returning explicit modules only", exc)
+        return explicit
 
     expanded: list[str] = list(explicit)
     for prefix in prefixes:

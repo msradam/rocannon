@@ -17,17 +17,138 @@ Usage:
 
 import json
 import logging
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any
 
 import ollama
 import pytest
 from fastmcp import Client
+from mcp.types import TextContent
 
 from rocannon.config import Config
 from rocannon.server import create_server
 
 logger = logging.getLogger("rocannon.test_llm")
+
+WATSONX_API_VERSION = "2024-01-29"
+WATSONX_IAM_URL = "https://iam.cloud.ibm.com/identity/token"
+WATSONX_CHAT_URL = "https://us-south.ml.cloud.ibm.com/ml/v1/text/chat"
+
+
+class WatsonxChatClient:
+    """Minimal OpenAI-compatible chat client for watsonx.ai.
+
+    Exchanges an IBM Cloud API key for a short-lived IAM token and calls
+    the watsonx.ai chat completions endpoint with tool-calling support.
+    Uses only stdlib — no openai SDK dependency.
+    """
+
+    def __init__(self, api_key: str, project_id: str, model: str) -> None:
+        self._api_key = api_key
+        self._project_id = project_id
+        self._model = model
+        self._token: str | None = None
+
+    def _iam_token(self) -> str:
+        if self._token:
+            return self._token
+        body = urllib.parse.urlencode(
+            {
+                "grant_type": "urn:ibm:params:oauth:grant-type:apikey",
+                "apikey": self._api_key,
+            }
+        ).encode()
+        req = urllib.request.Request(
+            WATSONX_IAM_URL,
+            data=body,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        with urllib.request.urlopen(req) as resp:
+            self._token = json.loads(resp.read())["access_token"]
+        return self._token  # type: ignore[return-value]
+
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "model_id": self._model,
+            "project_id": self._project_id,
+            "messages": messages,
+            "parameters": {"temperature": 0},
+        }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "required"
+
+        url = f"{WATSONX_CHAT_URL}?version={WATSONX_API_VERSION}"
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                "Authorization": f"Bearer {self._iam_token()}",
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return json.loads(resp.read())  # type: ignore[no-any-return]
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f"watsonx.ai request failed: {exc.read().decode()}") from exc
+
+
+async def run_watsonx_agent_loop(
+    mcp_client: Client,
+    tools: list[dict[str, Any]],
+    client: WatsonxChatClient,
+    prompt: str,
+    max_turns: int = 5,
+) -> dict[str, Any]:
+    """Run a full LLM → tool-call → result loop against watsonx.ai."""
+    messages: list[dict[str, Any]] = [{"role": "user", "content": prompt}]
+    tool_calls_made: list[tuple[str, dict[str, Any]]] = []
+    raw_results: list[str] = []
+
+    for _turn in range(max_turns):
+        response = client.chat(messages=messages, tools=tools)
+        choice = response["choices"][0]["message"]
+        messages.append(choice)
+
+        tcs = choice.get("tool_calls") or []
+        if not tcs:
+            return {
+                "tool_calls": tool_calls_made,
+                "final_response": choice.get("content") or "",
+                "raw_results": raw_results,
+            }
+
+        for tc in tcs:
+            name = tc["function"]["name"]
+            args = json.loads(tc["function"]["arguments"])
+            tool_calls_made.append((name, args))
+            logger.info("Tool call: %s(%s)", name, json.dumps(args))
+
+            try:
+                result = await mcp_client.call_tool(name, args)
+                c = result.content[0] if result.content else None
+                result_text = c.text if isinstance(c, TextContent) else str(c)
+            except Exception as exc:
+                result_text = json.dumps({"error": str(exc)})
+
+            raw_results.append(result_text)
+            messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result_text})
+
+    return {
+        "tool_calls": tool_calls_made,
+        "final_response": "",
+        "raw_results": raw_results,
+    }
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -135,7 +256,7 @@ async def run_agent_loop(
             tools=ollama_tools,
             options={"temperature": 0, "num_ctx": 16384},
         )
-        messages.append(response.message)
+        messages.append({"role": "assistant", "content": response.message.content or ""})
 
         if not response.message.tool_calls:
             return {
@@ -146,13 +267,14 @@ async def run_agent_loop(
 
         for tc in response.message.tool_calls:
             name = tc.function.name
-            args = tc.function.arguments
+            args = dict(tc.function.arguments)
             tool_calls_made.append((name, args))
             logger.info("Tool call: %s(%s)", name, json.dumps(args))
 
             try:
                 result = await mcp_client.call_tool(name, args)
-                result_text = result.content[0].text if hasattr(result, "content") else str(result)
+                c = result.content[0] if result.content else None
+                result_text = c.text if isinstance(c, TextContent) else str(c)
             except Exception as exc:
                 result_text = json.dumps({"error": str(exc)})
 
@@ -161,7 +283,7 @@ async def run_agent_loop(
 
     return {
         "tool_calls": tool_calls_made,
-        "final_response": messages[-1].get("content", "") if isinstance(messages[-1], dict) else "",
+        "final_response": response.message.content or "",
         "raw_results": raw_results,
     }
 
@@ -424,3 +546,102 @@ class TestZosSchema:
             assert "cb8a" in target_enum
             assert "cb86" in target_enum
             assert "source_system" in target_enum
+
+
+# ---------------------------------------------------------------------------
+# WatsonX z/OS schema tests (cloud granite-3-3-8b-instruct, no live z/OS)
+# ---------------------------------------------------------------------------
+
+
+class TestWatsonxZosSchema:
+    """Same z/OS schema assertions as TestZosSchema, but using watsonx.ai cloud model.
+
+    Requires inventories/ibmcloud_info.yml with API_KEY and PROJECT_ID.
+    Does NOT execute against real z/OS — only checks tool selection.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, watsonx_creds: tuple[str, str, str], zos_server: Any) -> None:
+        api_key, project_id, model = watsonx_creds
+        self.client = WatsonxChatClient(api_key, project_id, model)
+        self.server = zos_server
+
+    @pytest.mark.asyncio
+    async def test_zos_ping_tool_selection(self) -> None:
+        """Cloud model should choose zos_ping for z/OS connectivity check."""
+        async with Client(self.server) as mcp_client:
+            tools = await mcp_client.list_tools()
+            wx_tools, _ = mcp_tools_to_ollama(tools)
+
+            result = await run_watsonx_agent_loop(
+                mcp_client,
+                wx_tools,
+                self.client,
+                "Check if z/OS LPAR cb8a is reachable. Use the z/OS-specific ping module.",
+                max_turns=1,
+            )
+
+            assert result["tool_calls"], "Model should make a tool call"
+            name, args = result["tool_calls"][0]
+            assert name == "ibm.ibm_zos_core.zos_ping"
+            assert args["target"] == "cb8a"
+
+    @pytest.mark.asyncio
+    async def test_zos_dataset_tool_selection(self) -> None:
+        """Cloud model should use zos_data_set to create a dataset."""
+        async with Client(self.server) as mcp_client:
+            tools = await mcp_client.list_tools()
+            wx_tools, _ = mcp_tools_to_ollama(tools)
+
+            result = await run_watsonx_agent_loop(
+                mcp_client,
+                wx_tools,
+                self.client,
+                "Create a sequential dataset called IBMUSER.TEST.DATA on z/OS host cb8a.",
+                max_turns=1,
+            )
+
+            assert result["tool_calls"], "Model should make a tool call"
+            name, args = result["tool_calls"][0]
+            assert name.startswith("ibm.ibm_zos_core.zos_"), f"Expected z/OS module, got {name}"
+            assert args["target"] == "cb8a"
+
+    @pytest.mark.asyncio
+    async def test_zos_job_submit_selection(self) -> None:
+        """Cloud model should use zos_job_submit for JCL submission."""
+        async with Client(self.server) as mcp_client:
+            tools = await mcp_client.list_tools()
+            wx_tools, _ = mcp_tools_to_ollama(tools)
+
+            result = await run_watsonx_agent_loop(
+                mcp_client,
+                wx_tools,
+                self.client,
+                "Submit the JCL dataset IBMUSER.TEST.JCL(HELLO) on cb86.",
+                max_turns=1,
+            )
+
+            assert result["tool_calls"], "Model should make a tool call"
+            name, args = result["tool_calls"][0]
+            assert name.startswith("ibm.ibm_zos_core.zos_"), f"Expected z/OS module, got {name}"
+            assert args["target"] == "cb86"
+
+    @pytest.mark.asyncio
+    async def test_zos_copy_selection(self) -> None:
+        """Cloud model should prefer zos_copy for z/OS file operations."""
+        async with Client(self.server) as mcp_client:
+            tools = await mcp_client.list_tools()
+            wx_tools, _ = mcp_tools_to_ollama(tools)
+
+            result = await run_watsonx_agent_loop(
+                mcp_client,
+                wx_tools,
+                self.client,
+                "Copy USS file /tmp/hello.txt to dataset IBMUSER.HELLO on z/OS host cb8b. "
+                "Use the z/OS copy module.",
+                max_turns=1,
+            )
+
+            assert result["tool_calls"], "Model should make a tool call"
+            name, _ = result["tool_calls"][0]
+            assert "copy" in name, f"Expected a copy module, got {name}"

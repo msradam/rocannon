@@ -29,6 +29,9 @@ import yaml
 OLLAMA_MODEL = "ibm/granite4:micro"
 OLLAMA_STARTUP_TIMEOUT = 30
 
+WATSONX_MODEL = "ibm/granite-3-3-8b-instruct"
+WATSONX_CREDS_PATH = Path(__file__).parent.parent / "inventories" / "ibmcloud_info.yml"
+
 CONTAINERS_DIR = Path(__file__).parent / "containers"
 
 CONTAINER_DEFS = {
@@ -268,3 +271,27 @@ def ollama_model() -> Generator[str, None, None]:
     if we_started_it and proc is not None:
         proc.terminate()
         proc.wait(timeout=10)
+
+
+# ---------------------------------------------------------------------------
+# WatsonX fixtures
+# ---------------------------------------------------------------------------
+
+
+def _read_ibmcloud_creds() -> dict[str, str]:
+    """Parse the key=value IBM Cloud credentials file."""
+    creds: dict[str, str] = {}
+    for line in WATSONX_CREDS_PATH.read_text().splitlines():
+        if "=" in line and not line.startswith("#"):
+            key, _, val = line.partition("=")
+            creds[key.strip()] = val.strip()
+    return creds
+
+
+@pytest.fixture(scope="session")
+def watsonx_creds() -> tuple[str, str, str]:
+    """Return (api_key, project_id, model). Skips if credentials file not found."""
+    if not WATSONX_CREDS_PATH.exists():
+        pytest.skip(f"IBM Cloud credentials not found: {WATSONX_CREDS_PATH}")
+    creds = _read_ibmcloud_creds()
+    return creds["API_KEY"], creds["PROJECT_ID"], WATSONX_MODEL

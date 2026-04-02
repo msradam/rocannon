@@ -48,7 +48,7 @@ src = ["src"]
 select = ["E", "W", "F", "I", "N", "UP", "B", "C4", "SIM", "S", "FURB"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S110", "S603", "S607"]
+"tests/**" = ["S101", "S105", "S110", "S310", "S603", "S607"]
 "src/rocannon/schema.py" = ["S603", "S607"]
 "src/rocannon/inventory.py" = ["S603"]
 

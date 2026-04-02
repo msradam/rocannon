@@ -1,8 +1,10 @@
 import asyncio
+import contextlib
 import inspect
 import json
 import keyword
 import logging
+import os
 import re as _re
 import time
 from typing import Annotated, Any, Literal
@@ -14,6 +16,13 @@ from fastmcp.server.middleware import Middleware, MiddlewareContext
 from pydantic import Field
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+
+try:
+    from opentelemetry import trace as _otel_trace
+
+    _tracer: Any = _otel_trace.get_tracer("rocannon")
+except ImportError:
+    _tracer = None
 
 from rocannon.config import Config
 from rocannon.executor import build_inventory_list, run_module
@@ -42,7 +51,13 @@ Prefer specific modules (e.g. `ansible_builtin_copy`, `ansible_builtin_file`) ov
 
 
 class _AuditMiddleware(Middleware):
-    """Emit a structured JSON audit record for every tool call."""
+    """Emit a structured JSON audit record and optional OTel span for every tool call.
+
+    When opentelemetry-sdk is installed, each call gets a span named
+    ``tools/call <module>``. Attributes: ``ansible.module``, ``ansible.target``,
+    ``ansible.latency_ms``. Configure the exporter via the standard
+    ``OTEL_EXPORTER_OTLP_ENDPOINT`` env var or run under ``opentelemetry-instrument``.
+    """
 
     async def on_call_tool(self, context: MiddlewareContext, call_next: Any) -> Any:
         start = time.monotonic()
@@ -50,21 +65,58 @@ class _AuditMiddleware(Middleware):
         tool_params: dict[str, Any] = dict(getattr(context.message, "arguments", {}) or {})
         target = tool_params.get("target", "unknown")
 
-        result = await call_next(context)
-
-        elapsed_ms = int((time.monotonic() - start) * 1000)
-        audit_logger.info(
-            json.dumps(
-                {
-                    "tool": tool_name,
-                    "target": target,
-                    "latency_ms": elapsed_ms,
-                    "status": "ok",
-                },
-                default=str,
-            )
+        span_cm: Any = (
+            _tracer.start_as_current_span(f"tools/call {tool_name}")
+            if _tracer is not None
+            else contextlib.nullcontext()
         )
+        with span_cm as span:
+            if span is not None:
+                span.set_attribute("ansible.module", tool_name)
+                span.set_attribute("ansible.target", target)
+
+            result = await call_next(context)
+
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            if span is not None:
+                span.set_attribute("ansible.latency_ms", elapsed_ms)
+
+            audit_logger.info(
+                json.dumps(
+                    {
+                        "tool": tool_name,
+                        "target": target,
+                        "latency_ms": elapsed_ms,
+                        "status": "ok",
+                    },
+                    default=str,
+                )
+            )
         return result
+
+
+class _RateLimitingMiddleware(Middleware):
+    """Limit concurrent tool calls to prevent Ansible job flooding.
+
+    Configured via ``ROCANNON_MAX_CONCURRENT_TOOLS`` (default: 10). When the
+    limit is reached, additional calls queue and wait rather than being rejected
+    — this protects the managed hosts from a burst of simultaneous Ansible
+    connections without dropping requests.
+    """
+
+    def __init__(self, max_concurrent: int) -> None:
+        self._max_concurrent = max_concurrent
+        self._semaphore: asyncio.Semaphore | None = None
+
+    def _get_semaphore(self) -> asyncio.Semaphore:
+        # Lazily initialised so it's always created inside the running event loop.
+        if self._semaphore is None:
+            self._semaphore = asyncio.Semaphore(self._max_concurrent)
+        return self._semaphore
+
+    async def on_call_tool(self, context: MiddlewareContext, call_next: Any) -> Any:
+        async with self._get_semaphore():
+            return await call_next(context)
 
 
 audit_logger = logging.getLogger("rocannon.audit")
@@ -76,6 +128,8 @@ def create_server(config: Config) -> FastMCP:
         "rocannon",
         instructions=SERVER_INSTRUCTIONS,
     )
+    max_concurrent = int(os.environ.get("ROCANNON_MAX_CONCURRENT_TOOLS", "10"))
+    mcp.add_middleware(_RateLimitingMiddleware(max_concurrent))
     mcp.add_middleware(_AuditMiddleware())
 
     inv = load_inventory(config.inventories)

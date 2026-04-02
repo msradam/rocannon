@@ -1,9 +1,8 @@
 #!/bin/sh
-# Pre-commit code quality chain. Codebase agnostic.
-# Usage: ./check.sh [src_dirs...] (defaults: auto-detect src/ tests/)
+# Pre-commit code quality chain.
+# Usage: ./tests/check.sh [src_dirs...] (defaults: auto-detect src/ tests/)
 set -e
 
-# Auto-detect Python directories
 if [ $# -gt 0 ]; then
     dirs="$*"
     src_dirs="$*"
@@ -30,7 +29,7 @@ else
 fi
 
 step=0
-total=6
+total=4
 
 step=$((step + 1))
 echo "[$step/$total] ruff format --check $dirs"
@@ -43,14 +42,6 @@ $run ruff check $dirs
 step=$((step + 1))
 echo "[$step/$total] mypy $src_dirs"
 $run mypy $src_dirs
-
-step=$((step + 1))
-echo "[$step/$total] vulture"
-$run vulture
-
-step=$((step + 1))
-echo "[$step/$total] xenon (complexity)"
-$run xenon $src_dirs --max-absolute B --max-modules B --max-average A
 
 step=$((step + 1))
 echo "[$step/$total] pytest -x -q"

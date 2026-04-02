@@ -1,8 +1,8 @@
 all:
   hosts:
-    ubuntu:
+    demo:
       ansible_host: 127.0.0.1
-      ansible_port: 2222
+      ansible_port: 2225
       ansible_user: rocannon
       ansible_password: rocannon
       ansible_become: true

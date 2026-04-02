@@ -154,7 +154,7 @@ async def run_watsonx_agent_loop(
 # Fixtures
 # ---------------------------------------------------------------------------
 
-ZOS_INVENTORY = Path(__file__).resolve().parent.parent / "csrt.yml"
+ZOS_INVENTORY = Path(__file__).resolve().parent.parent / "inventories" / "csrt.yml"
 
 LINUXONE_MODULES = [
     "ansible.builtin.ping",

@@ -2,7 +2,7 @@
 # Uses csrt.yml inventory with IBM z/OS collections
 
 inventories:
-  - ./csrt.yml
+  - ./dev/inventories/csrt.yml
 
 modules:
   # - ansible.builtin

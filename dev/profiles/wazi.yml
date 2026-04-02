@@ -1,0 +1,4 @@
+inventories:
+  - /Users/amsrahman/dracula-flow/wazi-zos31-inventory.yml
+modules:
+  - ibm.ibm_zos_core

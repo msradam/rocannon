@@ -19,13 +19,13 @@ uv run ansible-galaxy collection install ibm.ibm_zos_core
 
 ```bash
 # Against z/OS LPARs (CSRT lab)
-uv run rocannon serve --profile profiles/zos.yml
+uv run rocannon serve --profile dev/profiles/zos.yml
 
 # Against local test containers
 uv run rocannon serve --profile profiles/local-dev.yml
 
 # With debug logging
-uv run rocannon serve --profile profiles/zos.yml --log-level debug
+uv run rocannon serve --profile dev/profiles/zos.yml --log-level debug
 ```
 
 To use Rocannon as an MCP server from an MCP client, configure `.mcp.json`:
@@ -52,7 +52,7 @@ Always run before committing:
 tests/check.sh
 ```
 
-This runs ruff format, ruff lint, mypy strict, vulture, and pytest — all five must pass. Fix issues before committing — do not weaken the gates.
+This runs ruff format, ruff lint, mypy strict, and pytest — all four must pass. Fix issues before committing — do not weaken the gates.
 
 If you modify source files in `src/rocannon/`, mypy strict mode applies. The codebase has deliberate `# type: ignore` comments in `server.py` at the boundary between static and dynamic typing — do not remove these. If you add new dynamic type construction, add targeted ignore comments with specific error codes (e.g., `# type: ignore[valid-type]`), never broad `# type: ignore`.
 
@@ -64,10 +64,10 @@ Requires podman or docker. Tests manage their own container lifecycle.
 
 ```bash
 # Run all LLM integration tests (requires Ollama + granite4:micro)
-uv run pytest tests/test_llm.py -v -k linuxone
+uv run pytest dev/tests/test_llm.py -v -k linuxone
 
 # Interactive REPL for manual testing
-uv run python tests/interactive.py
+uv run python dev/tests/interactive.py
 ```
 
 The interactive REPL auto-starts Ollama, pulls the model, and starts test containers. Just type natural language commands.
@@ -75,7 +75,7 @@ The interactive REPL auto-starts Ollama, pulls the model, and starts test contai
 ### z/OS schema tests (no connectivity needed)
 
 ```bash
-uv run pytest tests/test_llm.py -v -k zos
+uv run pytest dev/tests/test_llm.py -v -k zos
 ```
 
 These verify the LLM selects the correct z/OS tools and parameters. They do NOT execute against real z/OS — they only check the model's first tool call. Requires `csrt.yml` inventory to be present and `ibm.ibm_zos_core` collection installed.
@@ -87,8 +87,8 @@ This is the next milestone. The schema tests prove tool selection works; live te
 To test against real z/OS LPARs:
 
 1. Ensure SSH connectivity: `ssh rahman@cb8a.pok.stglabs.ibm.com`
-2. Verify Ansible can reach the host: `uv run ansible -i csrt.yml cb8a -m ping`
-3. Start the server: `uv run rocannon serve --profile profiles/zos.yml`
+2. Verify Ansible can reach the host: `uv run ansible -i dev/inventories/csrt.yml cb8a -m ping`
+3. Start the server: `uv run rocannon serve --profile dev/profiles/zos.yml`
 4. Connect an MCP client and issue tool calls
 
 Key things to validate on z/OS:
@@ -121,27 +121,39 @@ src/rocannon/
 └── executor.py     # ansible-runner execution + result parsing
 
 profiles/
-├── zos.yml         # z/OS full (builtin + ibm_zos_core against CSRT LPARs)
-├── zos-demo.yml    # z/OS demo (ibm_zos_core only)
-└── local-dev.yml   # Local dev (builtin against localhost + containers)
+└── local-dev.yml   # Local dev (ansible.builtin against localhost + containers)
 
 inventories/
 ├── podman.yml      # Test containers (linuxone-rhel/sles/ubuntu on localhost)
-├── local.yml       # localhost with local connection
-├── vsi.yml         # Wazi as a Service cloud z/OS
-└── host_vars/
-    └── vsi01.yml   # Per-host vars for cloud z/OS instance
+└── local.yml       # localhost with local connection
 
-csrt.yml            # CSRT lab z/OS LPARs (cb8a-cb89)
+deploy/
+└── rocannon.service  # Hardened systemd unit file
 
 tests/
-├── conftest.py     # Container lifecycle fixtures (build → start → inventory → teardown)
-├── test_llm.py     # LLM integration tests (LinuxONE live + z/OS schema)
-├── interactive.py  # Manual REPL with Ollama
-└── containers/
-    ├── Containerfile.rhel    # RHEL 10 (UBI10 minimal)
-    ├── Containerfile.sles    # SLES 16 (BCI 16.0)
-    └── Containerfile.ubuntu  # Ubuntu Server 24.04
+├── test_unit.py    # Unit tests (no live infra required)
+└── check.sh        # Quality gate: ruff, mypy, vulture, xenon, pytest
+
+dev/                # Scratch area — real lab credentials and live-infra tests
+├── inventories/
+│   ├── csrt.yml          # CSRT lab z/OS LPARs (cb8a–cb89)
+│   ├── vsi.yml           # Wazi as a Service cloud z/OS
+│   ├── ibmcloud_info.yml # IBM Cloud credentials (gitignored)
+│   └── host_vars/
+│       └── vsi01.yml     # Per-host vars for cloud z/OS instance
+├── profiles/
+│   ├── zos.yml           # CSRT lab: ansible.builtin + ibm_zos_core
+│   ├── zos-demo.yml      # CSRT lab: ibm_zos_core only
+│   ├── wazi.yml          # Wazi VSI: ibm_zos_core
+│   └── wazi-slim.yml     # Wazi VSI: subset of z/OS modules
+└── tests/
+    ├── conftest.py       # Container + Ollama + WatsonX fixtures
+    ├── test_llm.py       # LLM integration tests (LinuxONE live + z/OS + WatsonX)
+    ├── interactive.py    # Manual REPL with Ollama
+    └── containers/
+        ├── Containerfile.rhel
+        ├── Containerfile.sles
+        └── Containerfile.ubuntu
 ```
 
 ## z/OS Collection Compatibility Matrix
@@ -179,12 +191,96 @@ You have two options:
 
 After either change, restart the Rocannon server — it reads `ansible-doc` at startup, so it will pick up the new collection version's module schemas automatically.
 
+## Observability
+
+### Audit logging
+
+Every tool call emits a structured JSON record to the `rocannon.audit` logger:
+
+```json
+{"tool": "ansible_builtin_copy", "target": "db01", "latency_ms": 412, "status": "ok"}
+```
+
+Capture it alongside normal logs by directing the `rocannon.audit` logger to a file or log aggregator.
+
+### OpenTelemetry tracing
+
+Rocannon has built-in OTel support. Install the optional extra:
+
+```bash
+uv add "rocannon[otel]"
+# or: uv pip install "rocannon[otel]"
+```
+
+Then run the server under `opentelemetry-instrument`:
+
+```bash
+OTEL_SERVICE_NAME=rocannon \
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 \
+opentelemetry-instrument rocannon serve --profile dev/profiles/zos.yml
+```
+
+Each tool call produces a span named `tools/call <module>` with attributes:
+- `ansible.module` — the Ansible module FQCN
+- `ansible.target` — the host or group pattern
+- `ansible.latency_ms` — total wall-clock time in milliseconds
+
+Compatible with any OTLP-capable backend (Jaeger, Grafana Tempo, Honeycomb, etc.).
+
+### Rate limiting
+
+Concurrent Ansible job execution is limited to protect managed hosts from connection storms. Default: 10 simultaneous tool calls. Override via env var:
+
+```bash
+ROCANNON_MAX_CONCURRENT_TOOLS=5 rocannon serve --profile dev/profiles/zos.yml
+```
+
+Excess calls queue and wait — they are never rejected. Tune this to the SSH connection limit of the most constrained host in your inventory.
+
+## Production Deployment (systemd)
+
+A hardened systemd unit is in `deploy/rocannon.service`. To install:
+
+```bash
+# 1. Create a dedicated system user
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin rocannon
+
+# 2. Install the package into a virtualenv
+sudo mkdir -p /opt/rocannon
+sudo python3 -m venv /opt/rocannon/.venv
+sudo /opt/rocannon/.venv/bin/pip install rocannon[otel]
+
+# 3. Write the profile and secrets
+sudo mkdir -p /etc/rocannon
+sudo cp dev/profiles/zos.yml /etc/rocannon/profile.yml
+sudo tee /etc/rocannon/env <<'EOF'
+ANSIBLE_VAULT_PASSWORD_FILE=/etc/rocannon/vault-pass
+ROCANNON_MAX_CONCURRENT_TOOLS=10
+OTEL_SERVICE_NAME=rocannon
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+EOF
+sudo chmod 600 /etc/rocannon/env
+
+# 4. Install and start the service
+sudo cp deploy/rocannon.service /etc/systemd/system/
+sudo systemd-analyze verify /etc/systemd/system/rocannon.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now rocannon
+
+# 5. Check logs
+journalctl -u rocannon -f
+# Structured audit records only:
+journalctl -u rocannon -o json | jq 'select(.MESSAGE | startswith("{"))'
+```
+
+The unit file enforces `NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=strict`, and drops all Linux capabilities. Rocannon only needs outbound SSH — no elevated privileges required.
+
 ## Next Steps
 
 Priority order for z/OS validation:
 
-1. **Verify basic connectivity** — `ansible -i csrt.yml cb8a -m ping` from the work machine
-2. **Start the server with z/OS profile** — `uv run rocannon serve --profile profiles/zos.yml --log-level debug`
+1. **Verify basic connectivity** — `ansible -i dev/inventories/csrt.yml cb8a -m ping` from the work machine
+2. **Start the server with z/OS profile** — `uv run rocannon serve --profile dev/profiles/zos.yml --log-level debug`
 3. **Test via MCP client** — ping, then command (`uname -a`, `cat /etc/os-release`), then z/OS-specific modules
 4. **Write live z/OS tests** — mirror `TestLinuxOneLive` but targeting `source_system` group with z/OS modules. Start with `zos_ping`, then `zos_data_set` create/delete, then `zos_job_submit`
 5. **Multi-LPAR execution** — test running modules against the full `source_system` group and verify per-host result aggregation

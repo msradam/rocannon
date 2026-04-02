@@ -1,0 +1,57 @@
+[Unit]
+Description=Rocannon MCP Server
+Documentation=https://github.com/msradam/rocannon
+After=network.target
+# Restart after ansible-runner or SSH failures, not on clean exit (profile misconfiguration etc.)
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=rocannon
+Group=rocannon
+WorkingDirectory=/opt/rocannon
+
+# Secrets (ANSIBLE_VAULT_PASSWORD_FILE, ROCANNON_MAX_CONCURRENT_TOOLS, OTEL_* vars, etc.)
+# Create this file as root-owned 600: /etc/rocannon/env
+# Each line: KEY=value  (no export, no quotes needed)
+EnvironmentFile=-/etc/rocannon/env
+
+# Use the virtualenv binary directly for a deterministic, no-uv-at-runtime deployment.
+# Alternatively: ExecStart=/usr/local/bin/uv run --directory /opt/rocannon rocannon serve ...
+ExecStart=/opt/rocannon/.venv/bin/rocannon serve \
+    --profile /etc/rocannon/profile.yml \
+    --log-level INFO
+
+Restart=on-failure
+RestartSec=5s
+
+# --- Security hardening ---
+# Drop all capabilities; Rocannon only needs network (SSH) and file access.
+NoNewPrivileges=true
+# Private /tmp so ansible-runner's temp playbooks are not world-visible.
+PrivateTmp=true
+# Mount /usr, /boot, /etc read-only; Rocannon writes nowhere in system paths.
+ProtectSystem=strict
+# Home directories are not needed.
+ProtectHome=true
+# Prevent access to kernel tunables.
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+# Restrict syscall surface to common set.
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# No ambient capabilities.
+AmbientCapabilities=
+CapabilityBoundingSet=
+
+# --- Logging ---
+# Output goes to the systemd journal; read with: journalctl -u rocannon -f
+# For structured audit logs: journalctl -u rocannon -o json | jq 'select(.MESSAGE | startswith("{"))'
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rocannon
+
+[Install]
+WantedBy=multi-user.target

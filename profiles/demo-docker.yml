@@ -1,0 +1,21 @@
+# Demo: community.docker — Docker infrastructure as code
+# Install Docker on the demo container first:
+#   ansible demo -i dev/inventories/demo.yml -m ansible.builtin.apt \
+#     -a "name=docker.io state=present" -b
+#   ansible demo -i dev/inventories/demo.yml -m ansible.builtin.service \
+#     -a "name=docker state=started enabled=true" -b
+#
+# The LLM can then manage containers, images, networks, volumes, and Compose stacks.
+
+inventories:
+  - ./inventories/podman.yml
+modules:
+  - ansible.builtin
+  - community.docker.docker_container
+  - community.docker.docker_image_pull
+  - community.docker.docker_network
+  - community.docker.docker_volume
+  - community.docker.docker_compose_v2
+  - community.docker.docker_container_info
+  - community.docker.docker_host_info
+  - community.docker.docker_prune

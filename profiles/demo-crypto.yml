@@ -1,0 +1,15 @@
+# Demo: community.crypto — PKI and key management on the host
+# Generate private keys, CSRs, self-signed and CA-signed X.509 certificates,
+# OpenSSH key pairs, and LUKS encrypted devices — all directly on the target.
+
+inventories:
+  - ./inventories/podman.yml
+modules:
+  - ansible.builtin
+  - community.crypto.openssl_privatekey
+  - community.crypto.openssl_csr
+  - community.crypto.x509_certificate
+  - community.crypto.x509_certificate_info
+  - community.crypto.openssh_keypair
+  - community.crypto.certificate_complete_chain
+  - community.crypto.luks_device

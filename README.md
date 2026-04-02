@@ -88,9 +88,9 @@ uv run rocannon serve --profile profiles/zos.yml
 uv run rocannon serve --profile profiles/zos.yml --log-level debug
 ```
 
-### 7. Configure your MCP client
+### 7. Connect an MCP client
 
-Add to your `.mcp.json` (or equivalent):
+**Claude Code / Claude Desktop** — add to `.mcp.json`:
 
 ```json
 {
@@ -105,6 +105,41 @@ Add to your `.mcp.json` (or equivalent):
   }
 }
 ```
+
+**mcphost with a local Ollama model** — interactive agent loop from the terminal:
+
+Prerequisites: [Ollama](https://ollama.com) installed and running, model pulled (`ollama pull ibm/granite4:micro`).
+
+```bash
+# 1. Install mcphost — pick your platform from:
+#    https://github.com/mark3labs/mcphost/releases/latest
+#    Example for macOS arm64:
+curl -sL https://github.com/mark3labs/mcphost/releases/latest/download/mcphost_Darwin_arm64.tar.gz \
+  | tar xz && mv mcphost /usr/local/bin/
+
+# 2. Configure — mcphost reads ~/.mcphost.yml by default
+cp .mcphost.yml.example ~/.mcphost.yml
+# Edit ~/.mcphost.yml: replace /path/to/rocannon with your actual path
+#   and set --profile to the profile you want (e.g. profiles/local-dev.yml)
+
+# 3. Start an interactive session
+mcphost -m ollama:ibm/granite4:micro
+
+# Or run a single non-interactive prompt
+mcphost -m ollama:ibm/granite4:micro -p "what OS is running on the ubuntu host?"
+```
+
+mcphost starts Rocannon as a stdio subprocess, loads all registered tools, and runs a multi-turn agent loop. Granite selects tools, Rocannon executes them via Ansible, results come back as structured JSON. Type natural language — no playbooks needed.
+
+**vLLM or any OpenAI-compatible endpoint** — point mcphost at it with `--provider-url`:
+
+```bash
+mcphost -m openai:ibm-granite/granite-3.3-8b-instruct \
+  --provider-url http://your-vllm-host:8000/v1 \
+  --provider-api-key x
+```
+
+The model name must match what vLLM was started with (`--served-model-name`). The API key is required by the client but vLLM ignores it unless you configure auth.
 
 ## CLI Reference
 
@@ -134,4 +169,9 @@ Hosts are validated against loaded inventories before any execution. If a host i
 
 ## Architecture
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed pipeline diagrams and design rationale.
+Rocannon has three stages at startup and one at runtime:
+
+1. **Expand** — `ansible-doc --list -j` turns collection/namespace specs (e.g. `ibm.ibm_zos_core`) into individual module FQCNs
+2. **Introspect** — `ansible-doc -j <module>` for each FQCN extracts parameter names, types, defaults, choices, and descriptions
+3. **Register** — each module becomes a FastMCP tool with a fully typed Python signature; the `target` parameter is constrained to a `Literal` of known hosts/groups
+4. **Execute** — tool calls serialize `module_args` into a temporary playbook and run it via `ansible-runner`; results are parsed from runner events and returned as structured JSON

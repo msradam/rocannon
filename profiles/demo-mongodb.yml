@@ -1,0 +1,22 @@
+# Demo: community.mongodb — MongoDB administration
+# Install MongoDB on the demo container first:
+#   ansible demo -i dev/inventories/demo.yml -m ansible.builtin.shell \
+#     -a "curl -fsSL https://pgp.mongodb.com/server-7.0.asc | gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor" -b
+#   ansible demo -i dev/inventories/demo.yml -m ansible.builtin.apt_repository \
+#     -a "repo='deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/7.0 multiverse' state=present" -b
+#   ansible demo -i dev/inventories/demo.yml -m ansible.builtin.apt \
+#     -a "name=mongodb-org state=present update_cache=true" -b
+#   ansible demo -i dev/inventories/demo.yml -m ansible.builtin.service \
+#     -a "name=mongod state=started enabled=true" -b
+
+inventories:
+  - ./inventories/podman.yml
+modules:
+  - ansible.builtin
+  - community.mongodb.mongodb_user
+  - community.mongodb.mongodb_index
+  - community.mongodb.mongodb_schema
+  - community.mongodb.mongodb_parameter
+  - community.mongodb.mongodb_info
+  - community.mongodb.mongodb_status
+  - community.mongodb.mongodb_shell

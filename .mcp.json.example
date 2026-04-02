@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "rocannon": {
+      "command": "uv",
+      "args": [
+        "run", "--directory", "/path/to/rocannon",
+        "rocannon", "serve",
+        "--profile", "profiles/local-dev.yml"
+      ]
+    }
+  }
+}

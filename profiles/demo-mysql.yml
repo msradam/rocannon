@@ -1,0 +1,20 @@
+# Demo: community.mysql — MySQL/MariaDB administration
+# Install MySQL on the demo container first:
+#   ansible demo -i dev/inventories/demo.yml -m ansible.builtin.apt \
+#     -a "name=mysql-server state=present" -b
+#   ansible demo -i dev/inventories/demo.yml -m ansible.builtin.service \
+#     -a "name=mysql state=started enabled=true" -b
+#
+# Good for: showing runtime variable tuning (max_connections, buffer pool sizes),
+# user/grant management, and the replication setup flow.
+
+inventories:
+  - ./inventories/podman.yml
+modules:
+  - ansible.builtin
+  - community.mysql.mysql_db
+  - community.mysql.mysql_user
+  - community.mysql.mysql_variables
+  - community.mysql.mysql_query
+  - community.mysql.mysql_info
+  - community.mysql.mysql_replication

@@ -1,0 +1,24 @@
+# Demo: community.rabbitmq — message broker orchestration
+# Install RabbitMQ on the demo container first:
+#   ansible demo -i dev/inventories/demo.yml -m ansible.builtin.apt \
+#     -a "name=rabbitmq-server state=present" -b
+#   ansible demo -i dev/inventories/demo.yml -m ansible.builtin.service \
+#     -a "name=rabbitmq-server state=started enabled=true" -b
+#   # Enable the management plugin for HTTP API access:
+#   ansible demo -i dev/inventories/demo.yml -m ansible.builtin.command \
+#     -a "rabbitmq-plugins enable rabbitmq_management" -b
+#
+# All community.rabbitmq modules talk to the management HTTP API (port 15672).
+
+inventories:
+  - ./inventories/podman.yml
+modules:
+  - ansible.builtin
+  - community.rabbitmq.rabbitmq_vhost
+  - community.rabbitmq.rabbitmq_user
+  - community.rabbitmq.rabbitmq_queue
+  - community.rabbitmq.rabbitmq_exchange
+  - community.rabbitmq.rabbitmq_binding
+  - community.rabbitmq.rabbitmq_policy
+  - community.rabbitmq.rabbitmq_plugin
+  - community.rabbitmq.rabbitmq_parameter

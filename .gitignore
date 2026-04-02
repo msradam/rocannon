@@ -11,7 +11,7 @@ key.yml
 logs/
 
 # Credentials and secrets — never commit these
-inventories/ibmcloud_info.yml
+dev/inventories/ibmcloud_info.yml
 *_credentials*
 *_secret*
 *_token*

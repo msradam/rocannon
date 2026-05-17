@@ -165,37 +165,51 @@ helm:
 ## MCP clients
 
 Rocannon speaks the standard MCP protocol over stdio or HTTP. Any MCP client
-works.
+works. A working `.mcp.json` ships at the repo root; running `claude` from a
+checkout auto-discovers it.
 
-### Claude Desktop / Claude Code / Cursor
+Per-client config snippets (all targeting the quickstart profile) live in
+[`examples/clients/`](examples/clients/):
 
-Add to `.mcp.json` (or the client's equivalent):
+| Client | Where the config goes |
+|---|---|
+| **Claude Code** (CLI) | `.mcp.json` at the project root (shipped), or `claude mcp add ...` |
+| **Claude Desktop** | macOS: `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| **Cursor** | `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global) |
+| **mcphost** (terminal) | `~/.mcphost.yml` or `--config <path>` |
+| **IBM Bob** (Shell + IDE) | `.bob/mcp.json` (project) or `~/.bob/mcp_settings.json` (global) |
+
+All share the standard `mcpServers` envelope:
 
 ```json
 {
   "mcpServers": {
     "rocannon": {
-      "command": "env",
+      "command": "uv",
       "args": [
-        "ROCANNON_DATA_DIR=/path/to/your/project",
+        "run", "--directory", "/path/to/rocannon",
         "rocannon", "mcp", "serve",
-        "--profile", "/path/to/profile.yml"
+        "--profile", "/path/to/rocannon/examples/quickstart/profile.yml"
       ]
     }
   }
 }
 ```
 
-`ROCANNON_DATA_DIR` controls where saved playbooks land. Without it, they go
-into the rocannon process's working directory.
+Replace `/path/to/rocannon` with your checkout path. Use
+`ROCANNON_DATA_DIR=<some-dir>` in the `env` field if you want `save_playbook`
+to write outside the process CWD.
 
-### mcphost (terminal MCP client)
-
-Works with any model mcphost supports. Ollama example:
+### Verify any client can spawn rocannon
 
 ```bash
-mcphost --config .mcp.json --model ollama:granite4.1:3b -p "ping localhost"
+claude mcp get rocannon          # Claude Code
+mcphost --config examples/clients/mcphost.json --model ollama:granite4.1:3b \
+  -p "list every tool you have"  # mcphost
 ```
+
+Both should report the server connected and list typed tools from each loaded
+cannon.
 
 ## REPL (non-AI operator mode)
 

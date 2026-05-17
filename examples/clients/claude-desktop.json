@@ -1,0 +1,14 @@
+{
+  "_comment": "Drop this into ~/Library/Application Support/Claude/claude_desktop_config.json (macOS) or %APPDATA%\\Claude\\claude_desktop_config.json (Windows). Replace /path/to/rocannon with the actual checkout location.",
+  "mcpServers": {
+    "rocannon": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory", "/path/to/rocannon",
+        "rocannon", "mcp", "serve",
+        "--profile", "/path/to/rocannon/examples/quickstart/profile.yml"
+      ]
+    }
+  }
+}

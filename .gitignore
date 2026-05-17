@@ -6,7 +6,6 @@ dist/
 build/
 .ruff_cache/
 .pytest_cache/
-.mcp.json
 key.yml
 logs/
 

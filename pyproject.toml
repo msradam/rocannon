@@ -156,3 +156,10 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 no_implicit_reexport = true
 mypy_path = "src"
+
+# Third-party libs without bundled type stubs. ansible_runner ships
+# partial stubs only; python-hcl2 has no stubs at all (the rare import
+# site uses a targeted `# type: ignore[import-untyped]`).
+[[tool.mypy.overrides]]
+module = ["ansible_runner.*"]
+ignore_missing_imports = true

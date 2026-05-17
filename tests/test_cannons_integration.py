@@ -772,7 +772,7 @@ class TestSchemaFidelity:
     )
     async def test_tf_module_variables_count_matches_variables_tf(self, tmp_path: Path) -> None:
         """tf_module_null_label should expose every variable declared in the module."""
-        import hcl2
+        import hcl2  # type: ignore[import-untyped]
 
         cfg = Config(
             terraform=TerraformConfig(

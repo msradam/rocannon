@@ -189,7 +189,8 @@ example profile names or paths, update `examples/README.md` and
 - New behaviour has a test (unit if possible, integration if it
   touches real infra).
 - Any user-visible change is reflected in `README.md`.
-- No em-dashes anywhere in the diff (`grep -n '—' <changed files>`).
+- No em-dashes (U+2014) anywhere in the diff. Check with
+  `grep -nP '\x{2014}' <files>` or `rg '\u{2014}' <files>`.
 - The commit message follows the conventions above.
 
 If the task involves recording a new demo gif, see

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Driver for the README demo. Runs once setup-demo-env.sh has built the demo
-# infrastructure. Three mcphost invocations, one per cannon.
+# Driver for the README demo. Three mcphost invocations against real targets:
+# UBI9 SSH container (Ansible), OpenTofu workspace + Docker daemon (Terraform),
+# kind Kubernetes cluster with bitnami/nginx pre-deployed (Helm).
 
 set -e
 
@@ -12,9 +13,10 @@ if [[ ! -f "$ENV_DIR/mcp-ansible.json" ]]; then
   exit 1
 fi
 
-# Title card
-# Camel #C19A6B — warm, gilt-on-cloth lettering. Matches the gryphon glyph.
-printf '\033[38;2;193;154;107m'
+# Camel #C19A6B for the wordmark and section headers (gilt-on-cloth lettering).
+GOLD=$'\033[38;2;193;154;107m'; RESET=$'\033[0m'
+
+printf '%s' "$GOLD"
 cat <<'SPLASH'
 
 88d888b. .d8888b. .d8888b. .d8888b. 88d888b. 88d888b. .d8888b. 88d888b.
@@ -23,28 +25,27 @@ cat <<'SPLASH'
 dP       `88888P' `88888P' `88888P8 dP    dP dP    dP `88888P' dP    dP
 
 SPLASH
-printf '\033[0m  Ansible, Terraform, Helm as typed MCP tools.\n'
+printf '%s  Ansible, Terraform, Helm as typed MCP tools.\n' "$RESET"
 sleep 1.5
 
 ask() {
-  local label="$1"; local cfg="$2"; local prompt="$3"; local steps="${4:-4}"
-  printf '\n\033[38;2;193;154;107m== %s ==\033[0m\n' "$label"
+  local label="$1"; local cfg="$2"; local prompt="$3"; local steps="${4:-5}"
+  printf '\n%s== %s ==%s\n' "$GOLD" "$label" "$RESET"
   sleep 0.4
   mcphost --config "$cfg" --model "$MODEL" --max-steps "$steps" --compact -p "$prompt"
   sleep 1
 }
 
-ask "ansible: what OS is ubi9 running?" \
+ask "ansible: how much memory is free on ubi9?" \
     "$ENV_DIR/mcp-ansible.json" \
-    "On the ubi9 host, use ansible.builtin.command to run 'cat /etc/os-release | head -5'. Then tell me what Linux distribution it is in one sentence."
+    "Use ansible.builtin.command on the ubi9 host to run 'free -h'. Report the total memory and how much is available, in one sentence."
 
-ask "terraform: generate a random id" \
+ask "terraform: provision a docker network for the app" \
     "$ENV_DIR/mcp-terraform.json" \
-    "Use tf_random_string with instance=demo, length=16, special=false. Tell me what string the result has."
+    "Use tf_docker_network with instance=app and name=rocannon-app-net to create a bridge network. Then tell me what network ID and IPv4 subnet were assigned."
 
-ask "helm: what's deployed in the kind cluster?" \
+ask "helm: what's deployed in the cluster?" \
     "$ENV_DIR/mcp-helm.json" \
-    "Use helm_list with namespace=rocannon-demo. Report the release names you see or say the namespace is empty." \
-    6
+    "Use helm_list with namespace=rocannon-demo to see what releases are deployed. Report just the release name, chart version, and status in one short line."
 
 sleep 2

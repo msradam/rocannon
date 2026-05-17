@@ -53,7 +53,9 @@ def _show_chart(name: str, version: str | None, kubeconfig: Path | None) -> dict
         args += ["--version", version]
     proc = subprocess.run(
         _helm_cmd(kubeconfig, *args),
-        capture_output=True, text=True, timeout=60,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"helm show chart failed: {proc.stderr.strip()}")
@@ -77,15 +79,25 @@ def _install_or_upgrade(
     install succeed." Pass ``wait=True`` for blocking installs (CI gates).
     """
     with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".yaml", delete=False,
+        mode="w",
+        suffix=".yaml",
+        delete=False,
     ) as f:
         yaml.safe_dump(values or {}, f)
         values_path = f.name
 
     args = [
-        "upgrade", "--install", release_name, chart_spec.name,
-        "--namespace", namespace, "--create-namespace",
-        "--values", values_path, "--output", "json",
+        "upgrade",
+        "--install",
+        release_name,
+        chart_spec.name,
+        "--namespace",
+        namespace,
+        "--create-namespace",
+        "--values",
+        values_path,
+        "--output",
+        "json",
     ]
     if wait:
         args += ["--wait", "--timeout", timeout]
@@ -95,7 +107,9 @@ def _install_or_upgrade(
     try:
         proc = subprocess.run(
             _helm_cmd(kubeconfig, *args),
-            capture_output=True, text=True, timeout=600,
+            capture_output=True,
+            text=True,
+            timeout=600,
         )
     finally:
         Path(values_path).unlink(missing_ok=True)
@@ -128,7 +142,9 @@ def _helm_list(namespace: str | None, kubeconfig: Path | None) -> list[dict[str,
         args += ["--all-namespaces"]
     proc = subprocess.run(
         _helm_cmd(kubeconfig, *args),
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     if proc.returncode != 0:
         return []
@@ -139,13 +155,12 @@ def _helm_list(namespace: str | None, kubeconfig: Path | None) -> list[dict[str,
         return []
 
 
-def _helm_status(
-    release_name: str, namespace: str, kubeconfig: Path | None
-) -> dict[str, Any]:
+def _helm_status(release_name: str, namespace: str, kubeconfig: Path | None) -> dict[str, Any]:
     proc = subprocess.run(
-        _helm_cmd(kubeconfig, "status", release_name,
-                  "--namespace", namespace, "--output", "json"),
-        capture_output=True, text=True, timeout=30,
+        _helm_cmd(kubeconfig, "status", release_name, "--namespace", namespace, "--output", "json"),
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     if proc.returncode != 0:
         return {"ok": False, "error": proc.stderr.strip()}
@@ -155,12 +170,12 @@ def _helm_status(
         return {"ok": False, "_raw": proc.stdout}
 
 
-def _helm_uninstall(
-    release_name: str, namespace: str, kubeconfig: Path | None
-) -> dict[str, Any]:
+def _helm_uninstall(release_name: str, namespace: str, kubeconfig: Path | None) -> dict[str, Any]:
     proc = subprocess.run(
         _helm_cmd(kubeconfig, "uninstall", release_name, "--namespace", namespace),
-        capture_output=True, text=True, timeout=120,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     if proc.returncode != 0:
         return {"ok": False, "error": proc.stderr.strip()}
@@ -175,6 +190,7 @@ class HelmCannon(Cannon):
 
     def register(self, mcp: FastMCP, services: CannonServices) -> CannonMetrics:
         import shutil
+
         if not shutil.which("helm"):
             raise RuntimeError(
                 "Helm cannon needs the `helm` binary on PATH. Install with:\n"
@@ -193,14 +209,12 @@ class HelmCannon(Cannon):
                 description = (
                     f"Install or upgrade chart '{chart.name}'"
                     + (f" version {chart.version}" if chart.version else " (latest)")
-                    + (f", {meta.get('description', '')}" if meta.get('description') else "")
+                    + (f", {meta.get('description', '')}" if meta.get("description") else "")
                 )
                 self._register_install_tool(mcp, chart, cfg, slug, description)
                 self._register_show_values_tool(mcp, chart, cfg, slug)
                 metrics.tools_registered += 2
-                metrics.tool_names.extend(
-                    [f"helm_install_{slug}", f"helm_show_values_{slug}"]
-                )
+                metrics.tool_names.extend([f"helm_install_{slug}", f"helm_show_values_{slug}"])
             except Exception as exc:
                 metrics.tools_failed.append(chart.name)
                 logger.warning("Failed to register helm chart %s: %s", chart.name, exc)
@@ -230,7 +244,12 @@ class HelmCannon(Cannon):
             wait: bool = False,
         ) -> dict[str, Any]:
             return _install_or_upgrade(
-                chart, release_name, namespace, values, cfg.kubeconfig, wait=wait,
+                chart,
+                release_name,
+                namespace,
+                values,
+                cfg.kubeconfig,
+                wait=wait,
             )
 
     def _register_show_values_tool(
@@ -254,7 +273,9 @@ class HelmCannon(Cannon):
                 args += ["--version", chart.version]
             proc = subprocess.run(
                 _helm_cmd(cfg.kubeconfig, *args),
-                capture_output=True, text=True, timeout=60,
+                capture_output=True,
+                text=True,
+                timeout=60,
             )
             return proc.stdout if proc.returncode == 0 else f"error: {proc.stderr.strip()}"
 
@@ -275,7 +296,8 @@ class HelmCannon(Cannon):
             tags={"helm", "rocannon.meta"},
         )
         def _status(
-            release_name: str, namespace: str = cfg.default_namespace,
+            release_name: str,
+            namespace: str = cfg.default_namespace,
         ) -> dict[str, Any]:
             return _helm_status(release_name, namespace, cfg.kubeconfig)
 
@@ -285,7 +307,8 @@ class HelmCannon(Cannon):
             tags={"helm", "rocannon.meta"},
         )
         def _uninstall(
-            release_name: str, namespace: str = cfg.default_namespace,
+            release_name: str,
+            namespace: str = cfg.default_namespace,
         ) -> dict[str, Any]:
             return _helm_uninstall(release_name, namespace, cfg.kubeconfig)
 

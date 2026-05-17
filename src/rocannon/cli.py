@@ -74,18 +74,12 @@ def _build_config(
 ) -> Config:
     has_flags = bool(inventories or modules)
     if profile and has_flags:
-        raise typer.BadParameter(
-            "--profile and --inventory/--modules are mutually exclusive."
-        )
+        raise typer.BadParameter("--profile and --inventory/--modules are mutually exclusive.")
     if profile:
         return load_profile(profile, transport=transport)
     if has_flags:
-        return Config(
-            inventories=inventories, modules=modules, transport=transport
-        )
-    raise typer.BadParameter(
-        "Provide either --profile or at least --inventory and --modules."
-    )
+        return Config(inventories=inventories, modules=modules, transport=transport)
+    raise typer.BadParameter("Provide either --profile or at least --inventory and --modules.")
 
 
 def _parse_arg(raw: str) -> tuple[str, str]:
@@ -118,23 +112,31 @@ def _start_server(
     log_level: LogLevel,
 ) -> None:
     _setup_logging(log_level)
-    config = _build_config(
-        list(inventories or []), list(modules or []), profile, transport.value
-    )
+    config = _build_config(list(inventories or []), list(modules or []), profile, transport.value)
     server = create_server(config)
     server.run(transport=transport.value)
 
 
 _INV_OPT = typer.Option(
-    "--inventory", "-i", help="Inventory file (repeatable).",
-    exists=True, dir_okay=False, readable=True,
+    "--inventory",
+    "-i",
+    help="Inventory file (repeatable).",
+    exists=True,
+    dir_okay=False,
+    readable=True,
 )
 _MOD_OPT = typer.Option(
-    "--modules", "-m", help="Module, collection, or namespace (repeatable).",
+    "--modules",
+    "-m",
+    help="Module, collection, or namespace (repeatable).",
 )
 _PROFILE_OPT = typer.Option(
-    "--profile", "-p", help="YAML profile (alternative to --inventory/--modules).",
-    exists=True, dir_okay=False, readable=True,
+    "--profile",
+    "-p",
+    help="YAML profile (alternative to --inventory/--modules).",
+    exists=True,
+    dir_okay=False,
+    readable=True,
 )
 
 
@@ -170,9 +172,7 @@ def mcp_doctor(
     """Construct the MCP server in-process and survey its tools, resources, prompts."""
     _setup_logging(LogLevel.WARNING)
     try:
-        config = _build_config(
-            list(inventories or []), list(modules or []), profile, "stdio"
-        )
+        config = _build_config(list(inventories or []), list(modules or []), profile, "stdio")
         server = create_server(config)
     except Exception as exc:
         typer.echo(f"[fail] create_server: {exc}", err=True)
@@ -229,9 +229,7 @@ def _binary_check(name: str) -> tuple[_Severity, str]:
     if not path:
         return _Severity.FAIL, f"{name}: NOT FOUND on PATH"
     try:
-        proc = subprocess.run(
-            [name, "--version"], capture_output=True, text=True, timeout=10
-        )
+        proc = subprocess.run([name, "--version"], capture_output=True, text=True, timeout=10)
         out = proc.stdout or proc.stderr
         first_line = out.splitlines()[0] if out else ""
         return _Severity.OK, f"{name}: {path} ({first_line})"
@@ -243,7 +241,9 @@ def _inventory_check(inv: Path) -> tuple[_Severity, str]:
     try:
         proc = subprocess.run(
             ["ansible-inventory", "-i", str(inv), "--list"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
     except FileNotFoundError:
         return _Severity.FAIL, f"{inv}: ansible-inventory not available"
@@ -264,7 +264,9 @@ def _ping_check(inv: Path, host: str) -> tuple[_Severity, str]:
     try:
         proc = subprocess.run(
             ["ansible", "-i", str(inv), "-m", "ping", host],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
     except FileNotFoundError:
         return _Severity.WARN, f"{host}: ansible binary unavailable for ping"
@@ -287,12 +289,17 @@ def doctor(
     rows: list[tuple[_Severity, str, str]] = []
 
     # Versions
-    rows.append((_Severity.OK, "Versions",
-                 f"rocannon={_pkg_version('rocannon')} "
-                 f"fastmcp={_pkg_version('fastmcp')} "
-                 f"ansible-core={_pkg_version('ansible-core')} "
-                 f"ansible-runner={_pkg_version('ansible-runner')} "
-                 f"python={sys.version.split()[0]}"))
+    rows.append(
+        (
+            _Severity.OK,
+            "Versions",
+            f"rocannon={_pkg_version('rocannon')} "
+            f"fastmcp={_pkg_version('fastmcp')} "
+            f"ansible-core={_pkg_version('ansible-core')} "
+            f"ansible-runner={_pkg_version('ansible-runner')} "
+            f"python={sys.version.split()[0]}",
+        )
+    )
 
     # Binaries
     for binary in ("ansible-doc", "ansible-runner", "ansible-inventory", "ansible"):
@@ -300,19 +307,18 @@ def doctor(
         rows.append((sev, "Binaries", msg))
 
     # Env knobs
-    env_knobs = {
-        k: v for k, v in os.environ.items()
-        if k.startswith(("ROCANNON_", "OTEL_"))
-    }
+    env_knobs = {k: v for k, v in os.environ.items() if k.startswith(("ROCANNON_", "OTEL_"))}
     env_summary = (
-        ", ".join(f"{k}={v}" for k, v in sorted(env_knobs.items()))
-        or "(no ROCANNON_*/OTEL_* set)"
+        ", ".join(f"{k}={v}" for k, v in sorted(env_knobs.items())) or "(no ROCANNON_*/OTEL_* set)"
     )
     rows.append((_Severity.OK, "Env", env_summary))
-    rows.append((
-        _Severity.OK, "Timeouts",
-        f"timeout={resolve_timeout()}s idle={resolve_idle_timeout()}s",
-    ))
+    rows.append(
+        (
+            _Severity.OK,
+            "Timeouts",
+            f"timeout={resolve_timeout()}s idle={resolve_idle_timeout()}s",
+        )
+    )
 
     # Profile / inventories / Ansible config
     inv_paths: list[Path] = []
@@ -321,44 +327,56 @@ def doctor(
         try:
             cfg = load_profile(profile)
             inv_paths = cfg.inventories
-            rows.append((
-                _Severity.OK, "Profile",
-                f"{profile}: {len(cfg.modules)} module spec(s), "
-                f"{len(inv_paths)} inventory file(s)",
-            ))
+            rows.append(
+                (
+                    _Severity.OK,
+                    "Profile",
+                    f"{profile}: {len(cfg.modules)} module spec(s), "
+                    f"{len(inv_paths)} inventory file(s)",
+                )
+            )
         except Exception as exc:
             rows.append((_Severity.FAIL, "Profile", f"{profile}: failed to load, {exc}"))
     elif inventories:
         inv_paths = list(inventories)
 
     # Ansible config: what env will reach the ansible-runner subprocess?
-    inherited = sorted(
-        k for k in os.environ
-        if k.startswith(("ANSIBLE_", "ZOAU_"))
-    )
+    inherited = sorted(k for k in os.environ if k.startswith(("ANSIBLE_", "ZOAU_")))
     if cfg is not None and cfg.ansible_cfg:
         rows.append((_Severity.OK, "AnsibleCfg", f"ANSIBLE_CONFIG={cfg.ansible_cfg}"))
     else:
-        rows.append((
-            _Severity.OK, "AnsibleCfg",
-            "(none in profile; ansible's own discovery applies)",
-        ))
+        rows.append(
+            (
+                _Severity.OK,
+                "AnsibleCfg",
+                "(none in profile; ansible's own discovery applies)",
+            )
+        )
     if cfg is not None and cfg.vault_password_file:
-        rows.append((
-            _Severity.OK, "Vault",
-            f"ANSIBLE_VAULT_PASSWORD_FILE={cfg.vault_password_file}",
-        ))
+        rows.append(
+            (
+                _Severity.OK,
+                "Vault",
+                f"ANSIBLE_VAULT_PASSWORD_FILE={cfg.vault_password_file}",
+            )
+        )
     else:
         rows.append((_Severity.OK, "Vault", "(no vault_password_file in profile)"))
-    rows.append((
-        _Severity.OK, "Inherited",
-        ", ".join(inherited) if inherited else "(no ANSIBLE_*/ZOAU_* in process env)",
-    ))
+    rows.append(
+        (
+            _Severity.OK,
+            "Inherited",
+            ", ".join(inherited) if inherited else "(no ANSIBLE_*/ZOAU_* in process env)",
+        )
+    )
     if cfg is not None and cfg.extra_envvars:
-        rows.append((
-            _Severity.OK, "ExtraEnv",
-            ", ".join(f"{k}={v}" for k, v in sorted(cfg.extra_envvars.items())),
-        ))
+        rows.append(
+            (
+                _Severity.OK,
+                "ExtraEnv",
+                ", ".join(f"{k}={v}" for k, v in sorted(cfg.extra_envvars.items())),
+            )
+        )
 
     for inv in inv_paths:
         sev, msg = _inventory_check(inv)
@@ -370,7 +388,9 @@ def doctor(
             try:
                 proc = subprocess.run(
                     ["ansible-inventory", "-i", str(inv), "--list"],
-                    capture_output=True, text=True, timeout=30,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
                 )
                 hosts = list(json.loads(proc.stdout).get("_meta", {}).get("hostvars", {}).keys())
             except Exception:
@@ -446,30 +466,36 @@ def run(
     inventories: Annotated[
         list[Path],
         typer.Option(
-            "--inventory", "-i", help="Inventory file (repeatable, at least one required).",
-            exists=True, dir_okay=False, readable=True,
+            "--inventory",
+            "-i",
+            help="Inventory file (repeatable, at least one required).",
+            exists=True,
+            dir_okay=False,
+            readable=True,
         ),
     ],
     args: Annotated[
         list[str] | None,
         typer.Option(
-            "--arg", "-a",
+            "--arg",
+            "-a",
             help="Module argument as key=value (repeatable). Values are passed as strings.",
         ),
     ] = None,
     args_file: Annotated[
         Path | None,
         typer.Option(
-            "--args-file", help="JSON file containing a dict of module args (merged with -a).",
-            exists=True, dir_okay=False, readable=True,
+            "--args-file",
+            help="JSON file containing a dict of module args (merged with -a).",
+            exists=True,
+            dir_okay=False,
+            readable=True,
         ),
     ] = None,
     timeout: Annotated[
         int | None, typer.Option(help="Override default execution timeout (seconds).")
     ] = None,
-    pretty: Annotated[
-        bool, typer.Option("--pretty", help="Pretty-print JSON output.")
-    ] = False,
+    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
     log_level: Annotated[
         LogLevel, typer.Option("--log-level", help="Logging level.")
     ] = LogLevel.WARNING,
@@ -523,7 +549,9 @@ def search(
     try:
         proc = subprocess.run(
             ["ansible-doc", "--list", "--type", "module", "-j"],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
     except FileNotFoundError as exc:
         typer.echo("error: ansible-doc not found on PATH", err=True)
@@ -640,8 +668,12 @@ def playbook_run(
     inventories: Annotated[
         list[Path],
         typer.Option(
-            "--inventory", "-i", help="Inventory file (repeatable, at least one required).",
-            exists=True, dir_okay=False, readable=True,
+            "--inventory",
+            "-i",
+            help="Inventory file (repeatable, at least one required).",
+            exists=True,
+            dir_okay=False,
+            readable=True,
         ),
     ],
     pretty: Annotated[bool, typer.Option("--pretty")] = False,
@@ -662,7 +694,8 @@ def playbook_run(
         # CLI-side replay only knows how to run Ansible modules. For TF/Helm
         # steps, point the user at the MCP path which can dispatch any cannon.
         if "." not in step.tool or step.tool.split(".")[0] not in (
-            "ansible", *{n.split(".")[0] for n in ("ansible.builtin",)},
+            "ansible",
+            *{n.split(".")[0] for n in ("ansible.builtin",)},
         ):
             typer.echo(
                 f"error: 'rocannon playbook run' only executes Ansible steps; "

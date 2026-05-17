@@ -9,6 +9,7 @@ logger = logging.getLogger("rocannon.schema")
 class SchemaFetchError(RuntimeError):
     """Raised when ``ansible-doc`` cannot return a usable schema for a module."""
 
+
 ANSIBLE_TYPE_MAP: dict[str, type] = {
     "str": str,
     "string": str,

@@ -78,9 +78,7 @@ class TestServerToolRegistration:
         assert "ansible.builtin.ping" in names
 
     async def test_multiple_modules_register(self, inventory_file: Path) -> None:
-        server = _build_server(
-            inventory_file, ["ansible.builtin.ping", "ansible.builtin.copy"]
-        )
+        server = _build_server(inventory_file, ["ansible.builtin.ping", "ansible.builtin.copy"])
         async with Client(server) as client:
             tools = await client.list_tools()
         names = {t.name for t in tools}
@@ -109,9 +107,7 @@ class TestServerToolRegistration:
 
 
 class TestServerToolInvocation:
-    async def test_calls_run_module_with_target_and_args(
-        self, inventory_file: Path
-    ) -> None:
+    async def test_calls_run_module_with_target_and_args(self, inventory_file: Path) -> None:
         server = _build_server(inventory_file, ["ansible.builtin.ping"])
         with patch("rocannon.server.run_module", return_value=_ok_result()) as mock_run:
             async with Client(server) as client:
@@ -135,9 +131,7 @@ class TestServerToolInvocation:
         # `data` had no explicit value and defaulted to None, should be excluded
         assert mock_run.call_args[1]["module_args"] == {}
 
-    async def test_per_module_timeout_passed_through(
-        self, inventory_file: Path
-    ) -> None:
+    async def test_per_module_timeout_passed_through(self, inventory_file: Path) -> None:
         from rocannon.server import create_server
 
         with patch("rocannon.cannons.ansible.fetch_module_schema", return_value=PING_SCHEMA):

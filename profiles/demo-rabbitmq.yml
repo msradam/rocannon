@@ -1,4 +1,4 @@
-# Demo: community.rabbitmq — message broker orchestration
+# Demo: community.rabbitmq, message broker orchestration
 # Install RabbitMQ on the demo container first:
 #   ansible demo -i dev/inventories/demo.yml -m ansible.builtin.apt \
 #     -a "name=rabbitmq-server state=present" -b

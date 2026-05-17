@@ -74,8 +74,13 @@ class AnsibleCannon(Cannon):
                 schema = fetch_module_schema(module_name)
                 module_timeout = config.timeouts.get(module_name)
                 _register_tool(
-                    mcp, module_name, schema, inv, inventory_list,
-                    module_timeout, envvars,
+                    mcp,
+                    module_name,
+                    schema,
+                    inv,
+                    inventory_list,
+                    module_timeout,
+                    envvars,
                 )
                 schema_cache[module_name] = schema
                 metrics.tools_registered += 1

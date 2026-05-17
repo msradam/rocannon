@@ -43,7 +43,7 @@ class WatsonxChatClient:
 
     Exchanges an IBM Cloud API key for a short-lived IAM token and calls
     the watsonx.ai chat completions endpoint with tool-calling support.
-    Uses only stdlib — no openai SDK dependency.
+    Uses only stdlib, no openai SDK dependency.
     """
 
     def __init__(self, api_key: str, project_id: str, model: str) -> None:
@@ -407,7 +407,7 @@ class TestLinuxOneLive:
 
 
 # ---------------------------------------------------------------------------
-# z/OS tests (schema validation only — no live connectivity)
+# z/OS tests (schema validation only, no live connectivity)
 # ---------------------------------------------------------------------------
 
 
@@ -557,7 +557,7 @@ class TestWatsonxZosSchema:
     """Same z/OS schema assertions as TestZosSchema, but using watsonx.ai cloud model.
 
     Requires inventories/ibmcloud_info.yml with API_KEY and PROJECT_ID.
-    Does NOT execute against real z/OS — only checks tool selection.
+    Does NOT execute against real z/OS, only checks tool selection.
     """
 
     @pytest.fixture(autouse=True)

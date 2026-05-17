@@ -1,4 +1,4 @@
-# Demo: community.general + ansible.posix — Linux sysadmin toolkit
+# Demo: community.general + ansible.posix, Linux sysadmin toolkit
 # Showcases modules beyond the builtins: firewall rules, locales, timezone,
 # sysctl tuning, POSIX ACLs, SSH key management, sudoers, LVM, systemd introspection.
 

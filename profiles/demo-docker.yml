@@ -1,4 +1,4 @@
-# Demo: community.docker — Docker infrastructure as code
+# Demo: community.docker, Docker infrastructure as code
 # Install Docker on the demo container first:
 #   ansible demo -i dev/inventories/demo.yml -m ansible.builtin.apt \
 #     -a "name=docker.io state=present" -b

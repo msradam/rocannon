@@ -1,6 +1,6 @@
-# Demo: community.crypto — PKI and key management on the host
+# Demo: community.crypto, PKI and key management on the host
 # Generate private keys, CSRs, self-signed and CA-signed X.509 certificates,
-# OpenSSH key pairs, and LUKS encrypted devices — all directly on the target.
+# OpenSSH key pairs, and LUKS encrypted devices, all directly on the target.
 
 inventories:
   - ./inventories/podman.yml

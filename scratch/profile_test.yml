@@ -1,5 +1,0 @@
-inventories:
-  - ./scratch/inventory.yml
-modules:
-  - ansible.builtin
-  - community.docker

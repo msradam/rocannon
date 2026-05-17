@@ -223,7 +223,7 @@ async def agent_loop(
                 if error_msg == last_error:
                     consecutive_errors += 1
                     if consecutive_errors >= 2:
-                        return f"(giving up — model keeps failing with: {error_msg})"
+                        return f"(giving up, model keeps failing with: {error_msg})"
                 else:
                     last_error = error_msg
                     consecutive_errors = 1
@@ -251,7 +251,7 @@ async def repl(model: str) -> None:
         tools = await mcp_client.list_tools()
         ollama_tools = mcp_tools_to_ollama(tools)
         system_prompt = _build_system_prompt(tools)
-        print(f"Rocannon ready — {len(tools)} tools, model: {model}")
+        print(f"Rocannon ready, {len(tools)} tools, model: {model}")
         print("Type a natural language command, or 'quit' to exit.\n")
 
         while True:

@@ -1,12 +1,16 @@
 {
-  "_comment": "Project-level Claude Code MCP config. Auto-discovered when you run `claude` from this repo root. Loads the quickstart profile. See examples/clients/ for other MCP client formats.",
   "mcpServers": {
     "rocannon": {
       "command": "uv",
       "args": [
-        "run", "--directory", ".",
-        "rocannon", "mcp", "serve",
-        "--profile", "examples/quickstart/profile.yml"
+        "run",
+        "--directory",
+        ".",
+        "rocannon",
+        "mcp",
+        "serve",
+        "--profile",
+        "examples/quickstart/profile.yml"
       ]
     }
   }

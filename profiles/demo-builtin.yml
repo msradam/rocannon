@@ -1,4 +1,4 @@
-# Demo: ansible.builtin — core Linux administration
+# Demo: ansible.builtin, core Linux administration
 # The baseline. Every module ships with ansible-core, no collection install needed.
 # Good for: file ops, package management, service control, templating, users.
 

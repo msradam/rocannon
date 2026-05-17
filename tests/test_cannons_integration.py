@@ -58,9 +58,7 @@ def _docker_socket() -> str | None:
 
 
 def _docker_alive() -> bool:
-    return subprocess.run(
-        ["docker", "info"], capture_output=True, timeout=5
-    ).returncode == 0
+    return subprocess.run(["docker", "info"], capture_output=True, timeout=5).returncode == 0
 
 
 def _have(binary: str) -> bool:
@@ -68,20 +66,21 @@ def _have(binary: str) -> bool:
 
 
 def _kind_cluster_up(name: str = "rocannon-test") -> bool:
-    proc = subprocess.run(
-        ["kind", "get", "clusters"], capture_output=True, text=True, timeout=10
-    )
+    proc = subprocess.run(["kind", "get", "clusters"], capture_output=True, text=True, timeout=10)
     return proc.returncode == 0 and name in proc.stdout.split()
 
 
 _skip_no_docker = pytest.mark.skipif(
-    not _docker_alive(), reason="docker daemon not reachable",
+    not _docker_alive(),
+    reason="docker daemon not reachable",
 )
 _skip_no_tofu = pytest.mark.skipif(
-    not (_have("tofu") or _have("terraform")), reason="tofu/terraform not on PATH",
+    not (_have("tofu") or _have("terraform")),
+    reason="tofu/terraform not on PATH",
 )
 _skip_no_helm = pytest.mark.skipif(
-    not _have("helm"), reason="helm not on PATH",
+    not _have("helm"),
+    reason="helm not on PATH",
 )
 _skip_no_kind = pytest.mark.skipif(
     not (_have("kind") and _kind_cluster_up()),
@@ -101,7 +100,8 @@ def ssh_key(tmp_path_factory: pytest.TempPathFactory) -> Path:
     key = keydir / "id_ed25519"
     subprocess.run(
         ["ssh-keygen", "-t", "ed25519", "-N", "", "-f", str(key), "-C", "rocannon-integ"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     return key
 
@@ -127,24 +127,41 @@ def ubi_container(ssh_key: Path) -> Generator[tuple[str, int], None, None]:
         "RUN chmod 600 /root/.ssh/authorized_keys && "
         "sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' "
         "/etc/ssh/sshd_config\n"
-        "EXPOSE 22\nCMD [\"/usr/sbin/sshd\", \"-D\", \"-e\"]\n"
+        'EXPOSE 22\nCMD ["/usr/sbin/sshd", "-D", "-e"]\n'
     )
     subprocess.run(
         ["docker", "build", "-t", image, str(build_ctx)],
-        capture_output=True, check=True, timeout=180,
+        capture_output=True,
+        check=True,
+        timeout=180,
     )
     subprocess.run(
         ["docker", "run", "-d", "--name", name, "-p", f"127.0.0.1:{port}:22", image],
-        capture_output=True, check=True, timeout=30,
+        capture_output=True,
+        check=True,
+        timeout=30,
     )
 
     # Wait for sshd
     for _ in range(20):
         check = subprocess.run(
-            ["ssh", "-i", str(ssh_key), "-o", "StrictHostKeyChecking=no",
-             "-o", "UserKnownHostsFile=/dev/null", "-p", str(port),
-             "-o", "ConnectTimeout=2", "root@127.0.0.1", "echo ok"],
-            capture_output=True, timeout=5,
+            [
+                "ssh",
+                "-i",
+                str(ssh_key),
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "UserKnownHostsFile=/dev/null",
+                "-p",
+                str(port),
+                "-o",
+                "ConnectTimeout=2",
+                "root@127.0.0.1",
+                "echo ok",
+            ],
+            capture_output=True,
+            timeout=5,
         )
         if check.returncode == 0:
             break
@@ -160,9 +177,7 @@ def ubi_container(ssh_key: Path) -> Generator[tuple[str, int], None, None]:
 
 
 @pytest.fixture
-def ansible_inventory(
-    tmp_path: Path, ssh_key: Path, ubi_container: tuple[str, int]
-) -> Path:
+def ansible_inventory(tmp_path: Path, ssh_key: Path, ubi_container: tuple[str, int]) -> Path:
     """Per-test inventory pointing at the session-shared UBI container."""
     host, port = ubi_container
     inv = tmp_path / "hosts.ini"
@@ -204,10 +219,13 @@ class TestAnsibleCannonIntegration:
         server = create_server(cfg)
         async with Client(server) as c:
             # Echo a fake secret; verify the result has been scrubbed.
-            r = await c.call_tool("ansible.builtin.command", {
-                "target": "ubi9",
-                "cmd": "echo password=hunter2 trailing",
-            })
+            r = await c.call_tool(
+                "ansible.builtin.command",
+                {
+                    "target": "ubi9",
+                    "cmd": "echo password=hunter2 trailing",
+                },
+            )
             text = r.content[0].text
             assert "hunter2" not in text, "secret leaked into tool result"
             assert "REDACTED" in text or "password=" not in text
@@ -221,9 +239,7 @@ class TestAnsibleCannonIntegration:
 @_skip_no_tofu
 @_skip_no_docker
 class TestTerraformCannonResources:
-    async def test_create_and_destroy_docker_container(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_create_and_destroy_docker_container(self, tmp_path: Path) -> None:
         """Verify a container created via TF is observable in docker, then cleaned up.
 
         We deliberately don't destroy the image here, image refcounts are a
@@ -235,29 +251,39 @@ class TestTerraformCannonResources:
             pytest.skip("no docker socket")
         name = f"rocannon_integ_{uuid.uuid4().hex[:8]}"
 
-        cfg = Config(terraform=TerraformConfig(
-            workspace=tmp_path / "tf",
-            providers={"docker": {"source": "kreuzwerker/docker", "version": "~> 3.0"}},
-            provider_config={"docker": {"host": socket}},
-        ))
+        cfg = Config(
+            terraform=TerraformConfig(
+                workspace=tmp_path / "tf",
+                providers={"docker": {"source": "kreuzwerker/docker", "version": "~> 3.0"}},
+                provider_config={"docker": {"host": socket}},
+            )
+        )
         server = create_server(cfg)
         async with Client(server) as c:
-            await c.call_tool("tf_docker_image", {
-                "instance": "alpine", "name": "alpine:3.20",
-            })
-            r = await c.call_tool("tf_docker_container", {
-                "instance": "ctr",
-                "name": name,
-                "image": "${docker_image.alpine.image_id}",
-                "command": ["sleep", "60"],
-                "must_run": True,
-            })
+            await c.call_tool(
+                "tf_docker_image",
+                {
+                    "instance": "alpine",
+                    "name": "alpine:3.20",
+                },
+            )
+            r = await c.call_tool(
+                "tf_docker_container",
+                {
+                    "instance": "ctr",
+                    "name": name,
+                    "image": "${docker_image.alpine.image_id}",
+                    "command": ["sleep", "60"],
+                    "must_run": True,
+                },
+            )
             payload = json.loads(r.content[0].text)
             assert payload["ok"]
 
             proc = subprocess.run(
                 ["docker", "ps", "--filter", f"name={name}", "-q"],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
             assert proc.stdout.strip(), f"container {name} not running"
 
@@ -265,7 +291,8 @@ class TestTerraformCannonResources:
 
             proc = subprocess.run(
                 ["docker", "ps", "-a", "--filter", f"name={name}", "-q"],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
             assert not proc.stdout.strip(), f"container {name} not cleaned up"
 
@@ -278,27 +305,35 @@ class TestTerraformCannonResources:
 @_skip_no_tofu
 class TestTerraformCannonModules:
     async def test_cloudposse_label_module(self, tmp_path: Path) -> None:
-        cfg = Config(terraform=TerraformConfig(
-            workspace=tmp_path / "tf",
-            providers={"null": {"source": "hashicorp/null", "version": "~> 3.2"}},
-            modules=[TerraformModuleSpec(
-                source="cloudposse/label/null", version="0.25.0",
-            )],
-        ))
+        cfg = Config(
+            terraform=TerraformConfig(
+                workspace=tmp_path / "tf",
+                providers={"null": {"source": "hashicorp/null", "version": "~> 3.2"}},
+                modules=[
+                    TerraformModuleSpec(
+                        source="cloudposse/label/null",
+                        version="0.25.0",
+                    )
+                ],
+            )
+        )
         server = create_server(cfg)
         async with Client(server) as c:
             tools = await c.list_tools()
             module_tools = [t.name for t in tools if t.name.startswith("tf_module_")]
             assert "tf_module_null_label" in module_tools
 
-            r = await c.call_tool("tf_module_null_label", {
-                "instance": "test",
-                "namespace": "rc",
-                "stage": "integ",
-                "name": "wing",
-                "attributes": ["one"],
-                "delimiter": "-",
-            })
+            r = await c.call_tool(
+                "tf_module_null_label",
+                {
+                    "instance": "test",
+                    "namespace": "rc",
+                    "stage": "integ",
+                    "name": "wing",
+                    "attributes": ["one"],
+                    "delimiter": "-",
+                },
+            )
             payload = json.loads(r.content[0].text)
             assert payload["ok"]
             outputs = payload["outputs"]
@@ -315,17 +350,22 @@ class TestTerraformCannonModules:
 class TestHelmCannonIntegration:
     async def test_install_and_uninstall_nginx(self) -> None:
         ns = f"rc-helm-{uuid.uuid4().hex[:6]}"
-        cfg = Config(helm=HelmConfig(
-            charts=[HelmChartSpec(name="bitnami/nginx", version="21.0.6")],
-            default_namespace=ns,
-        ))
+        cfg = Config(
+            helm=HelmConfig(
+                charts=[HelmChartSpec(name="bitnami/nginx", version="21.0.6")],
+                default_namespace=ns,
+            )
+        )
         server = create_server(cfg)
         async with Client(server) as c:
-            r = await c.call_tool("helm_install_bitnami_nginx", {
-                "release_name": "rc-int",
-                "namespace": ns,
-                "values": {"replicaCount": 1, "service": {"type": "ClusterIP"}},
-            })
+            r = await c.call_tool(
+                "helm_install_bitnami_nginx",
+                {
+                    "release_name": "rc-int",
+                    "namespace": ns,
+                    "values": {"replicaCount": 1, "service": {"type": "ClusterIP"}},
+                },
+            )
             payload = r.data or json.loads(r.content[0].text)
             assert payload["ok"], f"install failed: {payload.get('error')}"
             assert payload["info"]["info"]["status"] == "deployed"
@@ -334,9 +374,13 @@ class TestHelmCannonIntegration:
             releases = r.data or json.loads(r.content[0].text)
             assert any(rel["name"] == "rc-int" for rel in releases)
 
-            r = await c.call_tool("helm_uninstall", {
-                "release_name": "rc-int", "namespace": ns,
-            })
+            r = await c.call_tool(
+                "helm_uninstall",
+                {
+                    "release_name": "rc-int",
+                    "namespace": ns,
+                },
+            )
             payload = r.data or json.loads(r.content[0].text)
             assert payload["ok"]
 
@@ -355,23 +399,37 @@ class TestCrossCannonSave:
     ) -> None:
         """A TF module call → commit_session writes valid YAML with the right tool name."""
         monkeypatch.setenv("ROCANNON_DATA_DIR", str(tmp_path / "data"))
-        cfg = Config(terraform=TerraformConfig(
-            workspace=tmp_path / "tf",
-            providers={"null": {"source": "hashicorp/null", "version": "~> 3.2"}},
-            modules=[TerraformModuleSpec(
-                source="cloudposse/label/null", version="0.25.0",
-            )],
-        ))
+        cfg = Config(
+            terraform=TerraformConfig(
+                workspace=tmp_path / "tf",
+                providers={"null": {"source": "hashicorp/null", "version": "~> 3.2"}},
+                modules=[
+                    TerraformModuleSpec(
+                        source="cloudposse/label/null",
+                        version="0.25.0",
+                    )
+                ],
+            )
+        )
         server = create_server(cfg)
         async with Client(server) as c:
-            await c.call_tool("tf_module_null_label", {
-                "instance": "saved",
-                "namespace": "x", "stage": "y", "name": "z",
-                "delimiter": "-",
-            })
-            r = await c.call_tool("commit_session", {
-                "name": "tf_saved", "description": "captured TF module call",
-            })
+            await c.call_tool(
+                "tf_module_null_label",
+                {
+                    "instance": "saved",
+                    "namespace": "x",
+                    "stage": "y",
+                    "name": "z",
+                    "delimiter": "-",
+                },
+            )
+            r = await c.call_tool(
+                "commit_session",
+                {
+                    "name": "tf_saved",
+                    "description": "captured TF module call",
+                },
+            )
             payload = r.data or json.loads(r.content[0].text)
             assert payload["ok"], f"commit_session failed: {payload.get('error')}"
 
@@ -407,19 +465,23 @@ class TestCrossCannonSave:
             "      name: thing\n"
         )
 
-        cfg = Config(terraform=TerraformConfig(
-            workspace=tmp_path / "tf",
-            providers={"null": {"source": "hashicorp/null", "version": "~> 3.2"}},
-            modules=[TerraformModuleSpec(
-                source="cloudposse/label/null", version="0.25.0",
-            )],
-        ))
+        cfg = Config(
+            terraform=TerraformConfig(
+                workspace=tmp_path / "tf",
+                providers={"null": {"source": "hashicorp/null", "version": "~> 3.2"}},
+                modules=[
+                    TerraformModuleSpec(
+                        source="cloudposse/label/null",
+                        version="0.25.0",
+                    )
+                ],
+            )
+        )
         server = create_server(cfg)
         async with Client(server) as c:
             prompts = await c.list_prompts()
             names = {p.name for p in prompts}
-            assert "playbook_tf_replay" in names, \
-                f"saved TF playbook not loaded as prompt: {names}"
+            assert "playbook_tf_replay" in names, f"saved TF playbook not loaded as prompt: {names}"
 
             rendered = await c.get_prompt("playbook_tf_replay")
             body = rendered.messages[0].content.text
@@ -437,9 +499,7 @@ class TestCrossCannonSave:
 class TestTerraformResourceBehavior:
     """Beyond 'it ran', does the typed arg shape actually reach the provider?"""
 
-    async def test_nested_ports_block_produces_real_port_mapping(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_nested_ports_block_produces_real_port_mapping(self, tmp_path: Path) -> None:
         """docker_container.ports (a nested block) should map a real port on the host."""
         socket = _docker_socket()
         if socket is None:
@@ -448,56 +508,66 @@ class TestTerraformResourceBehavior:
         host_port = 28000 + (hash(tmp_path.name) % 1000)
         name = f"rocannon_ports_{uuid.uuid4().hex[:8]}"
 
-        cfg = Config(terraform=TerraformConfig(
-            workspace=tmp_path / "tf",
-            providers={"docker": {"source": "kreuzwerker/docker", "version": "~> 3.0"}},
-            provider_config={"docker": {"host": socket}},
-        ))
+        cfg = Config(
+            terraform=TerraformConfig(
+                workspace=tmp_path / "tf",
+                providers={"docker": {"source": "kreuzwerker/docker", "version": "~> 3.0"}},
+                provider_config={"docker": {"host": socket}},
+            )
+        )
         server = create_server(cfg)
         async with Client(server) as c:
-            await c.call_tool("tf_docker_image", {
-                "instance": "nginx", "name": "nginx:alpine",
-            })
-            r = await c.call_tool("tf_docker_container", {
-                "instance": "web",
-                "name": name,
-                "image": "${docker_image.nginx.image_id}",
-                "must_run": True,
-                # The nested ports block, list of objects passed opaquely.
-                "ports": [
-                    {"internal": 80, "external": host_port, "protocol": "tcp"},
-                ],
-            })
+            await c.call_tool(
+                "tf_docker_image",
+                {
+                    "instance": "nginx",
+                    "name": "nginx:alpine",
+                },
+            )
+            r = await c.call_tool(
+                "tf_docker_container",
+                {
+                    "instance": "web",
+                    "name": name,
+                    "image": "${docker_image.nginx.image_id}",
+                    "must_run": True,
+                    # The nested ports block, list of objects passed opaquely.
+                    "ports": [
+                        {"internal": 80, "external": host_port, "protocol": "tcp"},
+                    ],
+                },
+            )
             payload = json.loads(r.content[0].text)
             assert payload["ok"]
 
             # Probe: docker port mapping should reflect what we asked for.
             proc = subprocess.run(
                 ["docker", "port", name, "80/tcp"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             assert proc.returncode == 0, proc.stderr
-            assert f":{host_port}" in proc.stdout, \
+            assert f":{host_port}" in proc.stdout, (
                 f"expected host port {host_port} in mapping; got {proc.stdout!r}"
+            )
 
             for addr in ("docker_container.web", "docker_image.nginx"):
                 await c.call_tool("tf_destroy", {"address": addr})
 
     async def test_noop_apply_reports_no_changes(self, tmp_path: Path) -> None:
         """Applying a resource twice with identical args → second plan: no changes."""
-        cfg = Config(terraform=TerraformConfig(
-            workspace=tmp_path / "tf",
-            providers={"null": {"source": "hashicorp/null", "version": "~> 3.2"}},
-        ))
+        cfg = Config(
+            terraform=TerraformConfig(
+                workspace=tmp_path / "tf",
+                providers={"null": {"source": "hashicorp/null", "version": "~> 3.2"}},
+            )
+        )
         server = create_server(cfg)
         async with Client(server) as c:
             args = {"instance": "x", "triggers": {"a": "1"}}
-            first = json.loads(
-                (await c.call_tool("tf_null_resource", args)).content[0].text
-            )
-            second = json.loads(
-                (await c.call_tool("tf_null_resource", args)).content[0].text
-            )
+            first = json.loads((await c.call_tool("tf_null_resource", args)).content[0].text)
+            second = json.loads((await c.call_tool("tf_null_resource", args)).content[0].text)
             assert first["ok"] and second["ok"]
             assert "no changes" in second["plan_summary"].lower()
             await c.call_tool("tf_destroy", {"address": "null_resource.x"})
@@ -516,25 +586,36 @@ class TestTerraformResourceBehavior:
         unique_tag = f"localhost/rocannon-test:{uuid.uuid4().hex[:8]}"
         subprocess.run(
             ["docker", "tag", "alpine:3.20", unique_tag],
-            capture_output=True, check=True, timeout=10,
+            capture_output=True,
+            check=True,
+            timeout=10,
         )
-        cfg = Config(terraform=TerraformConfig(
-            workspace=tmp_path / "tf",
-            providers={"docker": {"source": "kreuzwerker/docker", "version": "~> 3.0"}},
-            provider_config={"docker": {"host": socket}},
-        ))
+        cfg = Config(
+            terraform=TerraformConfig(
+                workspace=tmp_path / "tf",
+                providers={"docker": {"source": "kreuzwerker/docker", "version": "~> 3.0"}},
+                provider_config={"docker": {"host": socket}},
+            )
+        )
         server = create_server(cfg)
         async with Client(server) as c:
-            await c.call_tool("tf_docker_image", {
-                "instance": "img", "name": unique_tag,
-            })
-            await c.call_tool("tf_docker_container", {
-                "instance": "dep",
-                "name": ctr_name,
-                "image": "${docker_image.img.image_id}",
-                "command": ["sleep", "60"],
-                "must_run": True,
-            })
+            await c.call_tool(
+                "tf_docker_image",
+                {
+                    "instance": "img",
+                    "name": unique_tag,
+                },
+            )
+            await c.call_tool(
+                "tf_docker_container",
+                {
+                    "instance": "dep",
+                    "name": ctr_name,
+                    "image": "${docker_image.img.image_id}",
+                    "command": ["sleep", "60"],
+                    "must_run": True,
+                },
+            )
             # Destroying the image should also destroy the dependent container.
             await c.call_tool("tf_destroy", {"address": "docker_image.img"})
 
@@ -546,14 +627,15 @@ class TestTerraformResourceBehavior:
                 state_list = json.loads(state.content[0].text)
             else:
                 state_list = []
-            assert "docker_container.dep" not in state_list, \
+            assert "docker_container.dep" not in state_list, (
                 "cascade destroy did not remove the dependent container"
-            assert "docker_image.img" not in state_list, \
-                "primary resource not removed"
+            )
+            assert "docker_image.img" not in state_list, "primary resource not removed"
 
             proc = subprocess.run(
                 ["docker", "ps", "-a", "--filter", f"name={ctr_name}", "-q"],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
             assert not proc.stdout.strip(), "container should have been destroyed"
 
@@ -565,17 +647,22 @@ class TestHelmCannonBehavior:
         """replicaCount=2 in values should produce a 2-replica deployment."""
         ns = f"rc-helm-vals-{uuid.uuid4().hex[:6]}"
         release = "rc-vals"
-        cfg = Config(helm=HelmConfig(
-            charts=[HelmChartSpec(name="bitnami/nginx", version="21.0.6")],
-            default_namespace=ns,
-        ))
+        cfg = Config(
+            helm=HelmConfig(
+                charts=[HelmChartSpec(name="bitnami/nginx", version="21.0.6")],
+                default_namespace=ns,
+            )
+        )
         server = create_server(cfg)
         async with Client(server) as c:
-            r = await c.call_tool("helm_install_bitnami_nginx", {
-                "release_name": release,
-                "namespace": ns,
-                "values": {"replicaCount": 2, "service": {"type": "ClusterIP"}},
-            })
+            r = await c.call_tool(
+                "helm_install_bitnami_nginx",
+                {
+                    "release_name": release,
+                    "namespace": ns,
+                    "values": {"replicaCount": 2, "service": {"type": "ClusterIP"}},
+                },
+            )
             payload = r.data or json.loads(r.content[0].text)
             assert payload["ok"], payload.get("error")
 
@@ -583,22 +670,31 @@ class TestHelmCannonBehavior:
             # Deployment ``<release>-nginx``. Find any deploy with .spec.replicas=2
             # in the namespace; that's our chart-installed one.
             proc = subprocess.run(
-                ["kubectl", "get", "deploy", "-n", ns,
-                 "-o", "jsonpath={range .items[*]}{.metadata.name}={.spec.replicas} {end}"],
-                capture_output=True, text=True, timeout=30,
+                [
+                    "kubectl",
+                    "get",
+                    "deploy",
+                    "-n",
+                    ns,
+                    "-o",
+                    "jsonpath={range .items[*]}{.metadata.name}={.spec.replicas} {end}",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             assert proc.returncode == 0, proc.stderr
-            entries = dict(
-                kv.split("=", 1) for kv in proc.stdout.split() if "=" in kv
-            )
+            entries = dict(kv.split("=", 1) for kv in proc.stdout.split() if "=" in kv)
             assert entries, f"no deployments found in ns {ns}: {proc.stdout!r}"
-            assert "2" in entries.values(), (
-                f"replicaCount override did not apply, saw {entries}"
-            )
+            assert "2" in entries.values(), f"replicaCount override did not apply, saw {entries}"
 
-            await c.call_tool("helm_uninstall", {
-                "release_name": release, "namespace": ns,
-            })
+            await c.call_tool(
+                "helm_uninstall",
+                {
+                    "release_name": release,
+                    "namespace": ns,
+                },
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -622,9 +718,7 @@ class TestSchemaFidelity:
         )
         server = create_server(cfg)
         async with Client(server) as c:
-            tool = next(
-                t for t in await c.list_tools() if t.name == "ansible.builtin.ping"
-            )
+            tool = next(t for t in await c.list_tools() if t.name == "ansible.builtin.ping")
             props = tool.inputSchema.get("properties", {})
             required = set(tool.inputSchema.get("required", []))
             # ansible.builtin.ping has one optional param: data
@@ -637,55 +731,61 @@ class TestSchemaFidelity:
         not (_have("tofu") or _have("terraform")),
         reason="tofu/terraform not on PATH",
     )
-    async def test_tf_docker_container_required_matches_provider(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_tf_docker_container_required_matches_provider(self, tmp_path: Path) -> None:
         """docker_container's required attrs in our tool == provider schema's required."""
-        cfg = Config(terraform=TerraformConfig(
-            workspace=tmp_path / "tf",
-            providers={"docker": {"source": "kreuzwerker/docker", "version": "~> 3.0"}},
-        ))
+        cfg = Config(
+            terraform=TerraformConfig(
+                workspace=tmp_path / "tf",
+                providers={"docker": {"source": "kreuzwerker/docker", "version": "~> 3.0"}},
+            )
+        )
         server = create_server(cfg)
 
         # Ground truth from tofu providers schema
         proc = subprocess.run(
             ["tofu", f"-chdir={tmp_path / 'tf'}", "providers", "schema", "-json"],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         upstream = json.loads(proc.stdout)
         pkey = next(iter(upstream["provider_schemas"]))
         upstream_required = {
             attr_name
-            for attr_name, info in upstream["provider_schemas"][pkey]
-                ["resource_schemas"]["docker_container"]["block"]["attributes"].items()
+            for attr_name, info in upstream["provider_schemas"][pkey]["resource_schemas"][
+                "docker_container"
+            ]["block"]["attributes"].items()
             if info.get("required")
         }
 
         async with Client(server) as c:
-            tool = next(
-                t for t in await c.list_tools() if t.name == "tf_docker_container"
-            )
+            tool = next(t for t in await c.list_tools() if t.name == "tf_docker_container")
             registered_required = set(tool.inputSchema.get("required", []))
             # Our reserved slot adds 'instance'; subtract before comparison.
-            assert registered_required - {"instance"} == upstream_required, \
+            assert registered_required - {"instance"} == upstream_required, (
                 f"required drift: registered={registered_required} upstream={upstream_required}"
+            )
 
     @pytest.mark.skipif(
         not (_have("tofu") or _have("terraform")),
         reason="tofu/terraform not on PATH",
     )
-    async def test_tf_module_variables_count_matches_variables_tf(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_tf_module_variables_count_matches_variables_tf(self, tmp_path: Path) -> None:
         """tf_module_null_label should expose every variable declared in the module."""
         import hcl2
-        cfg = Config(terraform=TerraformConfig(
-            workspace=tmp_path / "tf",
-            providers={"null": {"source": "hashicorp/null", "version": "~> 3.2"}},
-            modules=[TerraformModuleSpec(
-                source="cloudposse/label/null", version="0.25.0",
-            )],
-        ))
+
+        cfg = Config(
+            terraform=TerraformConfig(
+                workspace=tmp_path / "tf",
+                providers={"null": {"source": "hashicorp/null", "version": "~> 3.2"}},
+                modules=[
+                    TerraformModuleSpec(
+                        source="cloudposse/label/null",
+                        version="0.25.0",
+                    )
+                ],
+            )
+        )
         server = create_server(cfg)
 
         # Ground truth: parse variables.tf directly
@@ -699,9 +799,7 @@ class TestSchemaFidelity:
                     upstream_var_names.add(raw_name.strip('"'))
 
         async with Client(server) as c:
-            tool = next(
-                t for t in await c.list_tools() if t.name == "tf_module_null_label"
-            )
+            tool = next(t for t in await c.list_tools() if t.name == "tf_module_null_label")
             registered = set(tool.inputSchema.get("properties", {}).keys())
             registered.discard("instance")  # our reserved slot
             assert registered == upstream_var_names, (
@@ -713,26 +811,28 @@ class TestSchemaFidelity:
     @pytest.mark.skipif(not _have("helm"), reason="helm not on PATH")
     async def test_helm_chart_description_in_tool_metadata(self) -> None:
         """helm_install_<chart> tool description should include the chart description."""
-        cfg = Config(helm=HelmConfig(
-            charts=[HelmChartSpec(name="bitnami/nginx", version="21.0.6")],
-        ))
+        cfg = Config(
+            helm=HelmConfig(
+                charts=[HelmChartSpec(name="bitnami/nginx", version="21.0.6")],
+            )
+        )
         server = create_server(cfg)
         async with Client(server) as c:
-            tool = next(
-                t for t in await c.list_tools()
-                if t.name == "helm_install_bitnami_nginx"
-            )
+            tool = next(t for t in await c.list_tools() if t.name == "helm_install_bitnami_nginx")
             # Truth: helm show chart returns YAML with a description field
             proc = subprocess.run(
                 ["helm", "show", "chart", "bitnami/nginx", "--version", "21.0.6"],
-                capture_output=True, text=True, timeout=60,
+                capture_output=True,
+                text=True,
+                timeout=60,
             )
             chart_meta = yaml.safe_load(proc.stdout)
             upstream_desc = chart_meta.get("description", "").strip()
             if upstream_desc:
                 # Tool description should reference it (we embed it).
-                assert upstream_desc[:30] in tool.description, \
+                assert upstream_desc[:30] in tool.description, (
                     "chart description not propagated to tool"
+                )
 
     @staticmethod
     def _dummy_inventory() -> Path:

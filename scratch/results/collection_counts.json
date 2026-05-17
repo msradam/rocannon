@@ -1,9 +1,0 @@
-{
-  "ansible.builtin": 71,
-  "community.general": 582,
-  "community.docker": 38,
-  "containers.podman": 33,
-  "community.mongodb": 21,
-  "community.postgresql": 23,
-  "kubernetes.core": 0
-}

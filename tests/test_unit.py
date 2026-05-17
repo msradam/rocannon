@@ -474,9 +474,7 @@ class TestParseRunnerResult:
         assert result["status"] == "failed"
 
     def test_multi_host_status_preserved_when_all_ok(self) -> None:
-        runner = _make_runner(
-            events=[_host_event("h1"), _host_event("h2")], status="successful"
-        )
+        runner = _make_runner(events=[_host_event("h1"), _host_event("h2")], status="successful")
         result = _parse_runner_result(runner)
         assert result["status"] == "successful"
 
@@ -603,9 +601,7 @@ class TestRunModule:
 
 
 class TestBuildEnvvars:
-    def test_inherits_ansible_and_zoau_prefixes(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_inherits_ansible_and_zoau_prefixes(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ANSIBLE_BECOME_PASS", "secret")
         monkeypatch.setenv("ZOAU_HOME", "/usr/lpp/IBM/zoautil")
         monkeypatch.setenv("HOME", "/Users/amsrahman")  # should NOT be inherited
@@ -825,9 +821,7 @@ class TestCorrelation:
         import logging as _logging
 
         fmt = CorrelationFormatter("[%(request_id)s] %(message)s")
-        record = _logging.LogRecord(
-            "x", _logging.INFO, __file__, 1, "hello", None, None
-        )
+        record = _logging.LogRecord("x", _logging.INFO, __file__, 1, "hello", None, None)
         token = set_request_id("deadbeef")
         try:
             assert fmt.format(record) == "[deadbeef] hello"
@@ -838,9 +832,7 @@ class TestCorrelation:
         import logging as _logging
 
         fmt = CorrelationFormatter("[%(request_id)s] %(message)s")
-        record = _logging.LogRecord(
-            "x", _logging.INFO, __file__, 1, "hello", None, None
-        )
+        record = _logging.LogRecord("x", _logging.INFO, __file__, 1, "hello", None, None)
         assert fmt.format(record) == "[-] hello"
 
 

@@ -35,10 +35,10 @@ logger = logging.getLogger("rocannon.terraform")
 
 @dataclass
 class ResourceSchema:
-    provider: str   # e.g. "docker"
-    name: str       # e.g. "docker_container"
+    provider: str  # e.g. "docker"
+    name: str  # e.g. "docker_container"
     attributes: dict[str, dict[str, Any]]
-    block_types: dict[str, dict[str, Any]]   # nested blocks; opaque pass-through
+    block_types: dict[str, dict[str, Any]]  # nested blocks; opaque pass-through
 
     @property
     def required(self) -> list[str]:
@@ -59,7 +59,9 @@ def reflect_schemas(workspace: Path) -> dict[str, ResourceSchema]:
     """
     proc = subprocess.run(
         ["tofu", f"-chdir={workspace}", "providers", "schema", "-json"],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     if proc.returncode != 0:
         raise RuntimeError(
@@ -129,13 +131,13 @@ def init_workspace(
                 stub_block["version"] = spec.version
             key = _module_key(spec)
             reflection_doc["module"][key] = stub_block
-        (workspace / _HCL_REFLECTION_FILE).write_text(
-            json.dumps(reflection_doc, indent=2)
-        )
+        (workspace / _HCL_REFLECTION_FILE).write_text(json.dumps(reflection_doc, indent=2))
 
     proc = subprocess.run(
         ["tofu", f"-chdir={workspace}", "init", "-no-color", "-input=false"],
-        capture_output=True, text=True, timeout=300,
+        capture_output=True,
+        text=True,
+        timeout=300,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"tofu init failed: {proc.stderr.strip() or proc.stdout.strip()}")
@@ -211,9 +213,19 @@ def apply_resource(
 
     try:
         plan_proc = subprocess.run(
-            ["tofu", f"-chdir={workspace}", "plan",
-             "-no-color", "-input=false", "-out", "rocannon.plan", "-detailed-exitcode"],
-            capture_output=True, text=True, timeout=120,
+            [
+                "tofu",
+                f"-chdir={workspace}",
+                "plan",
+                "-no-color",
+                "-input=false",
+                "-out",
+                "rocannon.plan",
+                "-detailed-exitcode",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         # 0=no changes, 1=error, 2=changes pending
         if plan_proc.returncode == 1:
@@ -224,9 +236,18 @@ def apply_resource(
 
         if not no_changes:
             apply_proc = subprocess.run(
-                ["tofu", f"-chdir={workspace}", "apply",
-                 "-no-color", "-input=false", "-auto-approve", "rocannon.plan"],
-                capture_output=True, text=True, timeout=300,
+                [
+                    "tofu",
+                    f"-chdir={workspace}",
+                    "apply",
+                    "-no-color",
+                    "-input=false",
+                    "-auto-approve",
+                    "rocannon.plan",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300,
             )
             if apply_proc.returncode != 0:
                 raise RuntimeError(
@@ -279,9 +300,18 @@ def destroy_resource(workspace: Path, address: str) -> dict[str, Any]:
 
     # Destroy first (with dependency-ordered cascade), then update config.
     proc = subprocess.run(
-        ["tofu", f"-chdir={workspace}", "destroy", "-no-color",
-         "-input=false", "-auto-approve", f"-target={address}"],
-        capture_output=True, text=True, timeout=300,
+        [
+            "tofu",
+            f"-chdir={workspace}",
+            "destroy",
+            "-no-color",
+            "-input=false",
+            "-auto-approve",
+            f"-target={address}",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=300,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"destroy failed: {proc.stderr.strip() or proc.stdout.strip()}")
@@ -305,7 +335,9 @@ def destroy_resource(workspace: Path, address: str) -> dict[str, Any]:
 def state_list(workspace: Path) -> list[str]:
     proc = subprocess.run(
         ["tofu", f"-chdir={workspace}", "state", "list"],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     if proc.returncode != 0:
         return []
@@ -315,7 +347,9 @@ def state_list(workspace: Path) -> list[str]:
 def _read_state_resource(workspace: Path, address: str) -> dict[str, Any]:
     proc = subprocess.run(
         ["tofu", f"-chdir={workspace}", "state", "show", "-no-color", address],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     if proc.returncode != 0:
         return {"_unavailable": proc.stderr.strip() or "state show failed"}
@@ -339,7 +373,7 @@ def _extract_plan_summary(plan_stdout: str) -> str:
 @dataclass
 class ModuleVariable:
     name: str
-    type_spec: str | None             # raw HCL type, e.g. "string", "${list(string)}"
+    type_spec: str | None  # raw HCL type, e.g. "string", "${list(string)}"
     description: str
     required: bool
     default: Any = None
@@ -350,12 +384,10 @@ class ModuleSchema:
     source: str
     version: str | None
     variables: dict[str, ModuleVariable]
-    outputs: list[str]                # output names, values fetched from state
+    outputs: list[str]  # output names, values fetched from state
 
 
-def reflect_modules(
-    workspace: Path, modules: list[Any]
-) -> dict[str, ModuleSchema]:
+def reflect_modules(workspace: Path, modules: list[Any]) -> dict[str, ModuleSchema]:
     """Parse ``variables.tf`` and ``outputs.tf`` for each downloaded module.
 
     Assumes ``init_workspace`` already ran with these modules, i.e. their
@@ -440,15 +472,19 @@ def _hcl_type_to_python(type_spec: str | None) -> Any:
         return str
     s = type_spec.strip()
     base_scalars: dict[str, Any] = {
-        "string": str, "number": float, "bool": bool, "any": str, "dynamic": str,
+        "string": str,
+        "number": float,
+        "bool": bool,
+        "any": str,
+        "dynamic": str,
     }
     if s in base_scalars:
         return base_scalars[s]
     if s.startswith(("list(", "set(", "tuple(")):
-        inner = s[s.index("(") + 1: s.rindex(")")]
+        inner = s[s.index("(") + 1 : s.rindex(")")]
         return list[_hcl_type_to_python(inner)]  # type: ignore[misc]
     if s.startswith("map("):
-        inner = s[s.index("(") + 1: s.rindex(")")]
+        inner = s[s.index("(") + 1 : s.rindex(")")]
         return dict[str, _hcl_type_to_python(inner)]  # type: ignore[misc]
     if s.startswith("object("):
         return dict
@@ -476,8 +512,7 @@ def apply_module(
     doc = _load_resources(workspace)
     prior_module = doc.get("module", {}).get(instance)
     prior_outputs = {
-        k: v for k, v in doc.get("output", {}).items()
-        if k.startswith(f"{instance}__")
+        k: v for k, v in doc.get("output", {}).items() if k.startswith(f"{instance}__")
     }
     block: dict[str, Any] = {"source": source}
     if version:
@@ -502,7 +537,9 @@ def apply_module(
         # are already cached.
         init_proc = subprocess.run(
             ["tofu", f"-chdir={workspace}", "init", "-no-color", "-input=false"],
-            capture_output=True, text=True, timeout=180,
+            capture_output=True,
+            text=True,
+            timeout=180,
         )
         if init_proc.returncode != 0:
             raise RuntimeError(
@@ -511,9 +548,19 @@ def apply_module(
             )
 
         plan_proc = subprocess.run(
-            ["tofu", f"-chdir={workspace}", "plan",
-             "-no-color", "-input=false", "-out", "rocannon.plan", "-detailed-exitcode"],
-            capture_output=True, text=True, timeout=300,
+            [
+                "tofu",
+                f"-chdir={workspace}",
+                "plan",
+                "-no-color",
+                "-input=false",
+                "-out",
+                "rocannon.plan",
+                "-detailed-exitcode",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
         )
         if plan_proc.returncode == 1:
             raise RuntimeError(
@@ -521,14 +568,22 @@ def apply_module(
             )
         if plan_proc.returncode == 2:
             apply_proc = subprocess.run(
-                ["tofu", f"-chdir={workspace}", "apply",
-                 "-no-color", "-input=false", "-auto-approve", "rocannon.plan"],
-                capture_output=True, text=True, timeout=900,
+                [
+                    "tofu",
+                    f"-chdir={workspace}",
+                    "apply",
+                    "-no-color",
+                    "-input=false",
+                    "-auto-approve",
+                    "rocannon.plan",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=900,
             )
             if apply_proc.returncode != 0:
                 raise RuntimeError(
-                    f"tofu apply failed: "
-                    f"{apply_proc.stderr.strip() or apply_proc.stdout.strip()}"
+                    f"tofu apply failed: {apply_proc.stderr.strip() or apply_proc.stdout.strip()}"
                 )
             plan_summary = _extract_plan_summary(plan_proc.stdout)
         else:
@@ -570,7 +625,9 @@ def _read_module_outputs(workspace: Path, instance: str) -> dict[str, Any]:
     """
     proc = subprocess.run(
         ["tofu", f"-chdir={workspace}", "output", "-json", "-no-color"],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     if proc.returncode != 0:
         return {"_unavailable": proc.stderr.strip()}
@@ -598,8 +655,11 @@ def _read_module_outputs(workspace: Path, instance: str) -> dict[str, Any]:
 def _tf_type_to_python(type_spec: Any) -> type:
     if isinstance(type_spec, str):
         return {
-            "string": str, "number": float, "bool": bool,
-            "any": str, "dynamic": str,
+            "string": str,
+            "number": float,
+            "bool": bool,
+            "any": str,
+            "dynamic": str,
         }.get(type_spec, str)
     if isinstance(type_spec, list) and type_spec:
         head = type_spec[0]
@@ -636,15 +696,21 @@ def _make_tf_tool_fn(
     # cannon's _sanitize_param_name + name_map.
     instance_ann = Annotated[
         str,
-        Field(description=(
-            "Resource instance label, the Terraform local name for this "
-            "block (e.g. 'my_container'). Must be a valid HCL identifier."
-        )),
+        Field(
+            description=(
+                "Resource instance label, the Terraform local name for this "
+                "block (e.g. 'my_container'). Must be a valid HCL identifier."
+            )
+        ),
     ]
     annotations["instance"] = instance_ann
-    sig_params.append(inspect.Parameter(
-        "instance", inspect.Parameter.KEYWORD_ONLY, annotation=instance_ann,
-    ))
+    sig_params.append(
+        inspect.Parameter(
+            "instance",
+            inspect.Parameter.KEYWORD_ONLY,
+            annotation=instance_ann,
+        )
+    )
 
     reserved = {"instance"}
     name_map: dict[str, str] = {}  # python_name → terraform_attr_name
@@ -665,17 +731,25 @@ def _make_tf_tool_fn(
         if required:
             ann = Annotated[py_type, Field(description=description)]
             annotations[safe_name] = ann
-            sig_params.append(inspect.Parameter(
-                safe_name, inspect.Parameter.KEYWORD_ONLY, annotation=ann,
-            ))
+            sig_params.append(
+                inspect.Parameter(
+                    safe_name,
+                    inspect.Parameter.KEYWORD_ONLY,
+                    annotation=ann,
+                )
+            )
         else:
             optional_type = py_type | None
             ann = Annotated[optional_type, Field(description=description)]
             annotations[safe_name] = ann
-            sig_params.append(inspect.Parameter(
-                safe_name, inspect.Parameter.KEYWORD_ONLY,
-                annotation=ann, default=None,
-            ))
+            sig_params.append(
+                inspect.Parameter(
+                    safe_name,
+                    inspect.Parameter.KEYWORD_ONLY,
+                    annotation=ann,
+                    default=None,
+                )
+            )
 
     # Nested blocks as opaque list-of-dict / dict for now.
     for block_name, block_info in schema.block_types.items():
@@ -690,20 +764,27 @@ def _make_tf_tool_fn(
             Field(description=f"Nested block '{block_name}' (opaque pass-through)."),
         ]
         annotations[safe_name] = ann
-        sig_params.append(inspect.Parameter(
-            safe_name, inspect.Parameter.KEYWORD_ONLY,
-            annotation=ann, default=None,
-        ))
+        sig_params.append(
+            inspect.Parameter(
+                safe_name,
+                inspect.Parameter.KEYWORD_ONLY,
+                annotation=ann,
+                default=None,
+            )
+        )
 
     async def tool_fn(**kwargs: Any) -> str:
         instance_label = kwargs.pop("instance")
         # Drop None-valued attrs and de-mangle param names back to TF attrs.
-        args = {
-            name_map.get(k, k): v for k, v in kwargs.items() if v is not None
-        }
+        args = {name_map.get(k, k): v for k, v in kwargs.items() if v is not None}
         import asyncio
+
         result = await asyncio.to_thread(
-            apply_resource, workspace, resource_type, instance_label, args,
+            apply_resource,
+            workspace,
+            resource_type,
+            instance_label,
+            args,
         )
         return json.dumps(result, indent=2, default=str)
 
@@ -714,7 +795,8 @@ def _make_tf_tool_fn(
 
 
 def _make_tf_module_tool_fn(
-    workspace: Path, schema: ModuleSchema,
+    workspace: Path,
+    schema: ModuleSchema,
 ) -> Any:
     """Build a typed async tool function for one Terraform module.
 
@@ -726,12 +808,17 @@ def _make_tf_module_tool_fn(
     sig_params: list[inspect.Parameter] = []
 
     instance_ann = Annotated[
-        str, Field(description="Module instance label (HCL local name)."),
+        str,
+        Field(description="Module instance label (HCL local name)."),
     ]
     annotations["instance"] = instance_ann
-    sig_params.append(inspect.Parameter(
-        "instance", inspect.Parameter.KEYWORD_ONLY, annotation=instance_ann,
-    ))
+    sig_params.append(
+        inspect.Parameter(
+            "instance",
+            inspect.Parameter.KEYWORD_ONLY,
+            annotation=instance_ann,
+        )
+    )
 
     reserved = {"instance"}
     name_map: dict[str, str] = {}
@@ -746,27 +833,39 @@ def _make_tf_module_tool_fn(
         if var.required:
             ann = Annotated[py_type, Field(description=var.description)]
             annotations[safe] = ann
-            sig_params.append(inspect.Parameter(
-                safe, inspect.Parameter.KEYWORD_ONLY, annotation=ann,
-            ))
+            sig_params.append(
+                inspect.Parameter(
+                    safe,
+                    inspect.Parameter.KEYWORD_ONLY,
+                    annotation=ann,
+                )
+            )
         else:
             optional_type = py_type | None
             ann = Annotated[optional_type, Field(description=var.description)]
             annotations[safe] = ann
-            sig_params.append(inspect.Parameter(
-                safe, inspect.Parameter.KEYWORD_ONLY,
-                annotation=ann, default=None,
-            ))
+            sig_params.append(
+                inspect.Parameter(
+                    safe,
+                    inspect.Parameter.KEYWORD_ONLY,
+                    annotation=ann,
+                    default=None,
+                )
+            )
 
     async def tool_fn(**kwargs: Any) -> str:
         instance_label = kwargs.pop("instance")
-        args = {
-            name_map.get(k, k): v for k, v in kwargs.items() if v is not None
-        }
+        args = {name_map.get(k, k): v for k, v in kwargs.items() if v is not None}
         import asyncio
+
         result = await asyncio.to_thread(
-            apply_module, workspace, schema.source, schema.version,
-            instance_label, args, schema.outputs,
+            apply_module,
+            workspace,
+            schema.source,
+            schema.version,
+            instance_label,
+            args,
+            schema.outputs,
         )
         return json.dumps(result, indent=2, default=str)
 
@@ -792,6 +891,7 @@ class TerraformCannon(Cannon):
 
     def register(self, mcp: FastMCP, services: CannonServices) -> CannonMetrics:
         import shutil
+
         if not (shutil.which("tofu") or shutil.which("terraform")):
             raise RuntimeError(
                 "Terraform cannon needs the `tofu` (OpenTofu) or `terraform` "
@@ -803,7 +903,10 @@ class TerraformCannon(Cannon):
 
         cfg = self.config
         init_workspace(
-            cfg.workspace, cfg.providers, cfg.provider_config, modules=cfg.modules,
+            cfg.workspace,
+            cfg.providers,
+            cfg.provider_config,
+            modules=cfg.modules,
         )
         metrics = CannonMetrics(cannon=self.name)
 
@@ -883,11 +986,20 @@ class TerraformCannon(Cannon):
             if address.startswith("module."):
                 # tofu destroy -target=module.<name> handles dependencies
                 import subprocess as _sp
+
                 proc = _sp.run(
-                    ["tofu", f"-chdir={workspace}", "destroy",
-                     "-no-color", "-input=false", "-auto-approve",
-                     f"-target={address}"],
-                    capture_output=True, text=True, timeout=300,
+                    [
+                        "tofu",
+                        f"-chdir={workspace}",
+                        "destroy",
+                        "-no-color",
+                        "-input=false",
+                        "-auto-approve",
+                        f"-target={address}",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
                 )
                 if proc.returncode != 0:
                     return json.dumps(

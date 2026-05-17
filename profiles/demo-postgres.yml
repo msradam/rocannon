@@ -1,4 +1,4 @@
-# Demo: community.postgresql — full PostgreSQL lifecycle
+# Demo: community.postgresql, full PostgreSQL lifecycle
 # Install postgres on the demo container first:
 #   ansible demo -i dev/inventories/demo.yml -m ansible.builtin.apt \
 #     -a "name=postgresql state=present" -b

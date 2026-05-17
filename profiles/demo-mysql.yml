@@ -1,4 +1,4 @@
-# Demo: community.mysql — MySQL/MariaDB administration
+# Demo: community.mysql, MySQL/MariaDB administration
 # Install MySQL on the demo container first:
 #   ansible demo -i dev/inventories/demo.yml -m ansible.builtin.apt \
 #     -a "name=mysql-server state=present" -b

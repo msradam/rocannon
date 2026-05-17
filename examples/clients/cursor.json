@@ -1,13 +1,16 @@
 {
-  "_comment": "Drop this into .cursor/mcp.json in your project (per-project) or ~/.cursor/mcp.json (global). Identical envelope to Claude.",
   "mcpServers": {
     "rocannon": {
       "command": "uv",
       "args": [
         "run",
-        "--directory", "/path/to/rocannon",
-        "rocannon", "mcp", "serve",
-        "--profile", "/path/to/rocannon/examples/quickstart/profile.yml"
+        "--directory",
+        "/path/to/rocannon",
+        "rocannon",
+        "mcp",
+        "serve",
+        "--profile",
+        "/path/to/rocannon/examples/quickstart/profile.yml"
       ]
     }
   }

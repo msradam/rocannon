@@ -36,14 +36,22 @@ dP       `88888P' `88888P' `88888P8 dP    dP dP    dP `88888P' dP    dP
 """
 
 DOT_COMMANDS = [
-    ".help", ".exit", ".quit",
-    ".target", ".inventory", ".modules",
-    ".doc", ".history", ".save",
-    ".resources", ".prompts",
+    ".help",
+    ".exit",
+    ".quit",
+    ".target",
+    ".inventory",
+    ".modules",
+    ".doc",
+    ".history",
+    ".save",
+    ".resources",
+    ".prompts",
     ".ai",
 ]
 
 _AI_MAX_STEPS = 8
+
 
 # Some smaller function-calling models choke on dots in tool names. Mangle the
 # dotted FQCNs we register to a double-underscore form for the LLM hop, then
@@ -94,7 +102,7 @@ class _ReplCompleter(Completer):
 
         # Mid-line: complete target=<hostname> after `target=`
         if word.startswith("target="):
-            prefix = word[len("target="):]
+            prefix = word[len("target=") :]
             for t in self._targets:
                 if t.startswith(prefix):
                     yield Completion(f"target={t}", start_position=-len(word))
@@ -197,9 +205,7 @@ class Repl:
         print_formatted_text()
 
     async def _loop(self) -> None:
-        completer = _ReplCompleter(
-            DOT_COMMANDS, list(self.tool_names), self.hosts + self.groups
-        )
+        completer = _ReplCompleter(DOT_COMMANDS, list(self.tool_names), self.hosts + self.groups)
         session: PromptSession[str] = PromptSession(
             history=FileHistory(str(self.history_path)),
             completer=completer,
@@ -292,15 +298,14 @@ class Repl:
             for e in entries[-20:]:
                 marker = "ok" if e["status"] == "successful" else e["status"]
                 print_formatted_text(
-                    f"  {e['request_id']}  {marker:>10}  "
-                    f"{e['tool']:<40}  → {e.get('target', '?')}"
+                    f"  {e['request_id']}  {marker:>10}  {e['tool']:<40}  → {e.get('target', '?')}"
                 )
             return
 
         if cmd == ".save":
             tokens = shlex.split(rest)
             if not tokens:
-                raise ValueError("usage: .save <name> [\"description\"]")
+                raise ValueError('usage: .save <name> ["description"]')
             name = tokens[0]
             description = tokens[1] if len(tokens) > 1 else ""
             result = await self.client.call_tool(
@@ -370,21 +375,25 @@ class Repl:
             tool_calls = getattr(choice, "tool_calls", None) or []
 
             # Record assistant turn (must precede tool results in OpenAI shape).
-            messages.append({
-                "role": "assistant",
-                "content": choice.content or "",
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
-                    for tc in tool_calls
-                ] if tool_calls else None,
-            })
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": choice.content or "",
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in tool_calls
+                    ]
+                    if tool_calls
+                    else None,
+                }
+            )
 
             if not tool_calls:
                 _print_ok("[ai]")
@@ -395,9 +404,7 @@ class Repl:
                 fn_name = _demangle(tc.function.name)
                 raw_args = tc.function.arguments
                 try:
-                    args = (
-                        raw_args if isinstance(raw_args, dict) else json.loads(raw_args)
-                    )
+                    args = raw_args if isinstance(raw_args, dict) else json.loads(raw_args)
                 except json.JSONDecodeError:
                     args = {"_raw": str(raw_args)}
                 _print_warn(f"[ai → tool] {fn_name}({args})")
@@ -406,11 +413,13 @@ class Repl:
                     result_text = result.content[0].text if result.content else "{}"
                 except Exception as exc:
                     result_text = json.dumps({"error": str(exc)})
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": result_text,
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result_text,
+                    }
+                )
 
         _print_warn(f"[ai] step budget ({_AI_MAX_STEPS}) exhausted")
 
@@ -446,7 +455,7 @@ class Repl:
         print_formatted_text("Module calls:")
         print_formatted_text("  <module> [target=<host>] [key=val ...]")
         print_formatted_text("    e.g.  ping target=webhosts")
-        print_formatted_text("          ansible.builtin.command target=h1 cmd=\"uptime\"")
+        print_formatted_text('          ansible.builtin.command target=h1 cmd="uptime"')
         print_formatted_text("")
         print_formatted_text("Dot commands:")
         print_formatted_text("  .help                       show this")
@@ -458,5 +467,5 @@ class Repl:
         print_formatted_text("  .resources                  list MCP resources")
         print_formatted_text("  .prompts                    list saved playbook prompts")
         print_formatted_text("  .history                    recent calls this session")
-        print_formatted_text("  .save <name> [\"desc\"]       persist this session as a playbook")
+        print_formatted_text('  .save <name> ["desc"]       persist this session as a playbook')
         print_formatted_text("  .ai <prompt>                LLM drives tools (needs rocannon[ai])")

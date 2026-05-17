@@ -1,4 +1,4 @@
-# dev/ — Lab Experiments
+# dev/: lab experiments
 
 This directory contains infrastructure and tests that require live access to IBM systems.
 It is not part of the shippable Rocannon package.
@@ -10,7 +10,7 @@ dev/
 ├── inventories/
 │   ├── csrt.yml              # IBM CSRT lab z/OS LPARs (cb8a–cb89)
 │   ├── vsi.yml               # Wazi as a Service cloud z/OS instance
-│   ├── ibmcloud_info.yml     # IBM Cloud credentials (gitignored — never commit)
+│   ├── ibmcloud_info.yml     # IBM Cloud credentials (gitignored, never commit)
 │   └── host_vars/
 │       └── vsi01.yml         # Per-host vars for the Wazi VSI
 ├── profiles/
@@ -31,7 +31,7 @@ dev/
 ## Running the integration tests
 
 ```bash
-# From the repo root — install dev deps first
+# From the repo root, install dev deps first
 uv sync
 
 # LinuxONE container tests (requires podman or docker)
@@ -62,4 +62,4 @@ PROJECT_ID=your-watsonx-project-id
 
 `dev/profiles/zos.yml` and `dev/profiles/zos-demo.yml` reference `dev/inventories/csrt.yml`.
 `dev/profiles/wazi.yml` and `dev/profiles/wazi-slim.yml` reference an external inventory
-at the absolute path recorded in the file — update this when working on a new machine.
+at the absolute path recorded in the file, update this when working on a new machine.

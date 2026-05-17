@@ -32,6 +32,7 @@ def resolve_data_root(root: Path | None = None) -> Path:
         return Path(env)
     return Path.cwd()
 
+
 # Filesystem-safe slug: letters, digits, dash, underscore. No leading dot or
 # dash (avoids hidden files and option-parsing surprises if listed on a CLI).
 _NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_\-]{0,63}$")
@@ -154,9 +155,7 @@ def load_all_playbooks(root: Path | None = None) -> dict[str, Playbook]:
     return out
 
 
-def validate_against_tools(
-    playbook: Playbook, tool_names: set[str]
-) -> list[str]:
+def validate_against_tools(playbook: Playbook, tool_names: set[str]) -> list[str]:
     """Return human-readable problems comparing ``playbook`` to the registered tools.
 
     Cross-cannon-friendly: only checks that each step's tool name is registered.
@@ -166,15 +165,11 @@ def validate_against_tools(
     problems: list[str] = []
     for idx, step in enumerate(playbook.steps):
         if step.tool not in tool_names:
-            problems.append(
-                f"step {idx}: tool {step.tool!r} not registered on this server"
-            )
+            problems.append(f"step {idx}: tool {step.tool!r} not registered on this server")
     return problems
 
 
 # Backward-compat alias. Older callers passed a schema_cache; we now only need
 # the tool names. Accept either shape, a dict's keys are its tool names.
-def validate_against_schemas(
-    playbook: Playbook, schema_cache: dict[str, Any]
-) -> list[str]:
+def validate_against_schemas(playbook: Playbook, schema_cache: dict[str, Any]) -> list[str]:
     return validate_against_tools(playbook, set(schema_cache))

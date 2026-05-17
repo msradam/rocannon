@@ -197,6 +197,7 @@ def create_server(config: Config) -> FastMCP:
     ansible_import_error: Exception | None = None
     try:
         from rocannon.cannons.ansible import AnsibleCannon
+
         ansible_cls = AnsibleCannon
     except ImportError as exc:
         ansible_import_error = exc
@@ -229,8 +230,7 @@ def create_server(config: Config) -> FastMCP:
         metrics = cannon.register(mcp, services)
         all_metrics.append(metrics)
         logger.info(
-            "Cannon '%s' registered: %d tool(s), %d resource(s), %d prompt(s); "
-            "%d failed",
+            "Cannon '%s' registered: %d tool(s), %d resource(s), %d prompt(s); %d failed",
             metrics.cannon,
             metrics.tools_registered,
             metrics.resources_registered,
@@ -362,9 +362,7 @@ def _playbook_prompt_body(pb: Playbook) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _register_playbook_prompts(
-    mcp: FastMCP, tool_names: set[str]
-) -> int:
+def _register_playbook_prompts(mcp: FastMCP, tool_names: set[str]) -> int:
     """Load .rocannon/playbooks/*.yml and register each as an MCP prompt.
 
     Validates each playbook against the union of registered tool names across
@@ -383,7 +381,8 @@ def _register_playbook_prompts(
         if problems:
             logger.warning(
                 "Skipping playbook %r, drift from current tools: %s",
-                name, "; ".join(problems),
+                name,
+                "; ".join(problems),
             )
             continue
 
@@ -485,10 +484,7 @@ def _add_save_tools(
         if not successful:
             return {"ok": False, "error": "all candidate calls were meta-tools"}
 
-        steps = [
-            PlaybookStep(tool=e.tool, args=dict(e.args))
-            for e in successful
-        ]
+        steps = [PlaybookStep(tool=e.tool, args=dict(e.args)) for e in successful]
         pb = Playbook(name=name, description=description, steps=steps)
         problems = validate_against_tools(pb, tool_names)
         if problems:

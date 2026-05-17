@@ -4,7 +4,7 @@ Manages two pieces of infrastructure:
 
 1. Test containers (RHEL 10, SLES 16, Ubuntu 24.04) with SSH + Python,
    matching the enterprise Linux distros supported on IBM LinuxONE (s390x).
-2. Ollama server and model lifecycle — starts the server if not running,
+2. Ollama server and model lifecycle, starts the server if not running,
    pulls the model if not present, skips if Ollama is not installed.
 
 Container lifecycle:

@@ -8,9 +8,9 @@ from pydantic import BaseModel, field_validator, model_validator
 class TerraformModuleSpec(BaseModel):
     """One Terraform Registry (or local) module to expose as a typed tool."""
 
-    source: str                       # e.g. "terraform-aws-modules/vpc/aws"
-    version: str | None = None        # pinned version; None = latest
-    tool_name: str | None = None      # override; default derived from source
+    source: str  # e.g. "terraform-aws-modules/vpc/aws"
+    version: str | None = None  # pinned version; None = latest
+    tool_name: str | None = None  # override; default derived from source
 
 
 class TerraformConfig(BaseModel):
@@ -31,9 +31,9 @@ class TerraformConfig(BaseModel):
 class HelmChartSpec(BaseModel):
     """One chart to expose as a typed install tool."""
 
-    name: str                       # e.g. "bitnami/redis"
-    version: str | None = None      # pinned chart version; None = latest
-    tool_name: str | None = None    # override; default derived from name
+    name: str  # e.g. "bitnami/redis"
+    version: str | None = None  # pinned chart version; None = latest
+    tool_name: str | None = None  # override; default derived from name
 
     @field_validator("name")
     @classmethod

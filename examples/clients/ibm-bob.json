@@ -1,13 +1,16 @@
 {
-  "_comment": "Drop this into .bob/mcp.json (project-level) or ~/.bob/mcp_settings.json (global). Bob accepts the same envelope as Claude/Cursor plus optional cwd, alwaysAllow, disabled, timeout. Works with both Bob Shell and Bob IDE.",
   "mcpServers": {
     "rocannon": {
       "command": "uv",
       "args": [
         "run",
-        "--directory", "/path/to/rocannon",
-        "rocannon", "mcp", "serve",
-        "--profile", "/path/to/rocannon/examples/quickstart/profile.yml"
+        "--directory",
+        "/path/to/rocannon",
+        "rocannon",
+        "mcp",
+        "serve",
+        "--profile",
+        "/path/to/rocannon/examples/quickstart/profile.yml"
       ],
       "alwaysAllow": [],
       "disabled": false

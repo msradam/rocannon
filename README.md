@@ -285,13 +285,12 @@ half-broken prompt.
 ## Development
 
 ```bash
-git clone <repo> rocannon
+git clone https://github.com/msradam/rocannon.git
 cd rocannon
-uv sync                            # installs all dev deps
-uv run pytest                      # unit tests
+uv sync                            # installs all dev + cannon deps
+./tests/check.sh                   # ruff format + ruff check + mypy + pytest
+./tests/check.sh --fix             # same, with auto-fix on format and lint
 uv run pytest -m integration       # opt-in: real docker, kind, tofu, helm
-uv run ruff check
-uv run mypy src/rocannon
 ```
 
 The integration suite is opt-in because it spins up real containers and talks

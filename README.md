@@ -4,6 +4,14 @@
   <img src="docs/assets/gryphon.svg" alt="" width="120">
 </p>
 
+<p align="center">
+  <strong>The same Ansible, Terraform, and Helm your team runs by hand. Now callable from any AI agent.</strong>
+</p>
+
+<p align="center">
+  <em>Every module, provider resource, and chart becomes a typed MCP tool. Every AI session saves as a reviewable playbook your team can re-run by hand.</em>
+</p>
+
 Rocannon registers Ansible modules, Terraform resources, Terraform registry
 modules, and Helm charts as typed MCP tools. One server, three catalogs, every
 operation auto-discovered from upstream.

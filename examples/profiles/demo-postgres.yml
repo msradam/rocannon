@@ -8,7 +8,7 @@
 # Then start this profile and let the LLM manage databases, roles, and privileges.
 
 inventories:
-  - ./inventories/podman.yml
+  - ../inventories/podman.yml
 modules:
   - ansible.builtin
   - community.postgresql.postgresql_db

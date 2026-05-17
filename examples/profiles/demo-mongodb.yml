@@ -10,7 +10,7 @@
 #     -a "name=mongod state=started enabled=true" -b
 
 inventories:
-  - ./inventories/podman.yml
+  - ../inventories/podman.yml
 modules:
   - ansible.builtin
   - community.mongodb.mongodb_user

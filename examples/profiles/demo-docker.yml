@@ -8,7 +8,7 @@
 # The LLM can then manage containers, images, networks, volumes, and Compose stacks.
 
 inventories:
-  - ./inventories/podman.yml
+  - ../inventories/podman.yml
 modules:
   - ansible.builtin
   - community.docker.docker_container

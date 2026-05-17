@@ -3,7 +3,7 @@
 # OpenSSH key pairs, and LUKS encrypted devices, all directly on the target.
 
 inventories:
-  - ./inventories/podman.yml
+  - ../inventories/podman.yml
 modules:
   - ansible.builtin
   - community.crypto.openssl_privatekey

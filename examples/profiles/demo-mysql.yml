@@ -9,7 +9,7 @@
 # user/grant management, and the replication setup flow.
 
 inventories:
-  - ./inventories/podman.yml
+  - ../inventories/podman.yml
 modules:
   - ansible.builtin
   - community.mysql.mysql_db

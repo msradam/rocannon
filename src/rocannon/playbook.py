@@ -167,9 +167,3 @@ def validate_against_tools(playbook: Playbook, tool_names: set[str]) -> list[str
         if step.tool not in tool_names:
             problems.append(f"step {idx}: tool {step.tool!r} not registered on this server")
     return problems
-
-
-# Backward-compat alias. Older callers passed a schema_cache; we now only need
-# the tool names. Accept either shape, a dict's keys are its tool names.
-def validate_against_schemas(playbook: Playbook, schema_cache: dict[str, Any]) -> list[str]:
-    return validate_against_tools(playbook, set(schema_cache))

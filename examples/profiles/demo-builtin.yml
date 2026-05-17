@@ -3,6 +3,6 @@
 # Good for: file ops, package management, service control, templating, users.
 
 inventories:
-  - ./inventories/podman.yml
+  - ../inventories/podman.yml
 modules:
   - ansible.builtin

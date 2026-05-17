@@ -1,5 +1,0 @@
-inventories:
-  - ./inventories/local.yml
-  - ./inventories/podman.yml
-modules:
-  - ansible.builtin

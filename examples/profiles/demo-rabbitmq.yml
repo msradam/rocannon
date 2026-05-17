@@ -11,7 +11,7 @@
 # All community.rabbitmq modules talk to the management HTTP API (port 15672).
 
 inventories:
-  - ./inventories/podman.yml
+  - ../inventories/podman.yml
 modules:
   - ansible.builtin
   - community.rabbitmq.rabbitmq_vhost

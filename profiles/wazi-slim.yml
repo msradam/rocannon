@@ -1,8 +1,0 @@
-inventories:
-  - /Users/amsrahman/dracula-flow/dev/inventories/wazi-zos31-inventory.yml
-modules:
-  - ibm.ibm_zos_core.zos_ping
-  - ibm.ibm_zos_core.zos_operator
-  - ibm.ibm_zos_core.zos_tso_command
-  - ibm.ibm_zos_core.zos_gather_facts
-  - ibm.ibm_zos_core.zos_job_query

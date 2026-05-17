@@ -100,7 +100,7 @@ def _pkg_version(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# `mcp` (formerly `serve`), start the MCP server
+# `mcp` subcommands: start the MCP server, doctor the wiring
 # ---------------------------------------------------------------------------
 
 

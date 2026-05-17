@@ -3,7 +3,7 @@
 # sysctl tuning, POSIX ACLs, SSH key management, sudoers, LVM, systemd introspection.
 
 inventories:
-  - ./inventories/podman.yml
+  - ../inventories/podman.yml
 modules:
   - ansible.builtin
   - ansible.posix

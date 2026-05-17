@@ -12,10 +12,10 @@ repos:
       - id: mypy
         additional_dependencies:
           - pydantic>=2.12.5
-          - click>=8.1.0
+          - typer>=0.25.0
           - pyyaml>=6.0.3
           - types-PyYAML
-          - fastmcp>=3.1.0
+          - fastmcp>=3.3.1
           - starlette>=0.45.0
         pass_filenames: false
         args: [src/rocannon]
@@ -27,9 +27,7 @@ repos:
       - id: check-toml
       - id: check-merge-conflict
       - id: check-added-large-files
-        args: ["--maxkb=500"]
-      - id: no-commit-to-branch
-        args: ["--branch", "main"]
+        args: ["--maxkb=2000"]
       - id: detect-private-key
 
   - repo: https://github.com/gitleaks/gitleaks

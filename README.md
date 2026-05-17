@@ -1,7 +1,7 @@
 # Rocannon
 
 <p align="center">
-  <img src="docs/assets/gryphon.png" alt="Windsteed gryphon" width="120">
+  <img src="docs/assets/gryphon.png" alt="" width="120">
 </p>
 
 Rocannon registers Ansible modules, Terraform resources, Terraform registry

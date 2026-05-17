@@ -37,13 +37,18 @@ Commit both `demo.cast` (replayable on asciinema.org) and `demo.gif`
 
 ## What the demo shows
 
-1. ASCII splash (matches `rocannon repl`'s boot banner).
-2. `docker ps` proving a real `redhat/ubi9-minimal` container is running.
-3. `cat /tmp/rocannon-demo-env/profile.yml` showing the loaded module set.
-4. `mcphost` invocation with a natural-language prompt.
-5. Granite picks `ansible.builtin.command`, calls it through the rocannon
-   MCP server against the UBI9 target, gets back structured output, and
-   summarizes the Linux distribution in one sentence.
+Splash, then three mcphost invocations back-to-back, one per cannon. Each
+loads a single-cannon rocannon MCP server and gives Granite one prompt:
+
+1. **Ansible:** ask the UBI9 SSH container what Linux distribution it is
+   (Granite picks `ansible.builtin.command`, runs `cat /etc/os-release`).
+2. **Terraform:** generate a 16-character random string
+   (Granite picks `tf_random_string`, returns the generated value).
+3. **Helm:** list releases in the `rocannon-demo` namespace of the kind
+   cluster (Granite picks `helm_list`, reports what's deployed).
+
+Real targets: UBI9 container, OpenTofu workspace, kind Kubernetes cluster.
+Real tool calls. Real structured output.
 
 ## Switching models
 

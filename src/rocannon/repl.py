@@ -28,12 +28,11 @@ from rocannon.server import create_server
 
 PROMPT = "rocannon> "
 
-# Rendered once with: figlet -f fender "Rocannon"
-SPLASH = r"""'||'''|,
- ||   ||
- ||...|' .|''|, .|'',  '''|.  `||''|,  `||''|,  .|''|, `||''|,
- || \\   ||  || ||    .|''||   ||  ||   ||  ||  ||  ||  ||  ||
-.||  \\. `|..|' `|..' `|..||. .||  ||. .||  ||. `|..|' .||  ||.
+# Rendered once with: figlet -f nancyj "rocannon"
+SPLASH = r"""88d888b. .d8888b. .d8888b. .d8888b. 88d888b. 88d888b. .d8888b. 88d888b.
+88'  `88 88'  `88 88'  `"" 88'  `88 88'  `88 88'  `88 88'  `88 88'  `88
+88       88.  .88 88.  ... 88.  .88 88    88 88    88 88.  .88 88    88
+dP       `88888P' `88888P' `88888P8 dP    dP dP    dP `88888P' dP    dP
 """
 
 DOT_COMMANDS = [

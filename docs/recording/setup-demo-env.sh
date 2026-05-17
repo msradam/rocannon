@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Build a UBI9 SSH container and write a profile + mcp.json that target it.
-# All ephemeral state lives under /tmp/rocannon-demo-env. Idempotent.
+# Build one Ansible target (UBI9 SSH container), pre-warm a Terraform workspace,
+# verify a kind cluster, and write three per-cannon profiles + three mcp.json
+# files under /tmp/rocannon-demo-env. Idempotent.
 
 set -euo pipefail
 
@@ -8,9 +9,12 @@ ROCANNON_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_DIR="/tmp/rocannon-demo-env"
 CONTAINER="rocannon-demo-ubi9"
 SSH_PORT=2222
+KIND_CLUSTER="rocannon-test"
 
-mkdir -p "$ENV_DIR"
+mkdir -p "$ENV_DIR" "$ENV_DIR/tf-work"
 SSH_KEY="$ENV_DIR/id_ed25519"
+
+# ---------- Ansible target ----------
 
 if [[ ! -f "$SSH_KEY" ]]; then
   ssh-keygen -t ed25519 -N "" -f "$SSH_KEY" -C "rocannon-demo" >/dev/null
@@ -46,15 +50,19 @@ cat > "$ENV_DIR/hosts.ini" <<EOF
 ubi9 ansible_host=127.0.0.1 ansible_port=${SSH_PORT} ansible_user=root ansible_ssh_private_key_file=${SSH_KEY} ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
 EOF
 
-cat > "$ENV_DIR/profile.yml" <<EOF
-inventories:
-  - ${ENV_DIR}/hosts.ini
-modules:
-  - ansible.builtin.command
-  - ansible.builtin.dnf
-EOF
+# ---------- kind cluster (for the Helm cannon) ----------
 
-cat > "$ENV_DIR/mcp.json" <<EOF
+if ! kind get clusters 2>/dev/null | grep -qx "$KIND_CLUSTER"; then
+  echo "Creating kind cluster '$KIND_CLUSTER'..." >&2
+  kind create cluster --name "$KIND_CLUSTER" >/dev/null
+fi
+kubectl --context "kind-$KIND_CLUSTER" wait --for=condition=Ready node --all --timeout=60s >/dev/null
+
+# ---------- profiles + mcp.json (one per cannon) ----------
+
+write_mcp_json() {
+  local profile="$1"; local out="$2"
+  cat > "$out" <<EOF
 {
   "mcpServers": {
     "rocannon": {
@@ -62,14 +70,48 @@ cat > "$ENV_DIR/mcp.json" <<EOF
       "args": [
         "run", "--directory", "${ROCANNON_ROOT}",
         "rocannon", "mcp", "serve",
-        "--profile", "${ENV_DIR}/profile.yml"
+        "--profile", "${profile}"
       ]
     }
   }
 }
 EOF
+}
 
-echo "Container running:  $CONTAINER on 127.0.0.1:${SSH_PORT}"
-echo "SSH key:            $SSH_KEY"
-echo "Profile:            $ENV_DIR/profile.yml"
-echo "MCP config:         $ENV_DIR/mcp.json"
+# Ansible cannon: one module
+cat > "$ENV_DIR/profile-ansible.yml" <<EOF
+inventories:
+  - ${ENV_DIR}/hosts.ini
+modules:
+  - ansible.builtin.command
+EOF
+write_mcp_json "$ENV_DIR/profile-ansible.yml" "$ENV_DIR/mcp-ansible.json"
+
+# Terraform cannon: just the random provider (no creds needed, fast)
+cat > "$ENV_DIR/profile-terraform.yml" <<EOF
+terraform:
+  workspace: ${ENV_DIR}/tf-work
+  providers:
+    random:
+      source: hashicorp/random
+      version: "~> 3.6"
+EOF
+write_mcp_json "$ENV_DIR/profile-terraform.yml" "$ENV_DIR/mcp-terraform.json"
+
+# Helm cannon: one chart against the kind cluster
+cat > "$ENV_DIR/profile-helm.yml" <<EOF
+helm:
+  charts:
+    - name: bitnami/nginx
+      version: "21.0.6"
+  default_namespace: rocannon-demo
+EOF
+write_mcp_json "$ENV_DIR/profile-helm.yml" "$ENV_DIR/mcp-helm.json"
+
+# Pre-warm the Terraform workspace so its `tofu init` doesn't run during
+# recording. Calling `mcp doctor` constructs the server which triggers init.
+( cd "$ENV_DIR" && uv run --directory "$ROCANNON_ROOT" rocannon mcp doctor \
+    --profile "$ENV_DIR/profile-terraform.yml" >/dev/null ) || true
+
+echo "Ready under $ENV_DIR:"
+ls -1 "$ENV_DIR"/*.yml "$ENV_DIR"/*.json

@@ -1,12 +1,12 @@
-<img src="docs/assets/gryphon.png" alt="" width="96" align="left">
-
 # Rocannon
+
+<p align="center">
+  <img src="docs/assets/gryphon.png" alt="Windsteed gryphon" width="120">
+</p>
 
 Rocannon registers Ansible modules, Terraform resources, Terraform registry
 modules, and Helm charts as typed MCP tools. One server, three catalogs, every
 operation auto-discovered from upstream.
-
-<br clear="left">
 
 ![demo](docs/assets/demo.gif)
 

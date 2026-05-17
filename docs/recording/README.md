@@ -1,51 +1,64 @@
 # Demo recording
 
-The GIF embedded in the top-level `README.md` is generated from `demo.sh` using
-[asciinema](https://asciinema.org) for capture and [agg](https://github.com/asciinema/agg)
-for GIF conversion.
+The GIF embedded in the top-level `README.md` shows mcphost driving a local
+LLM (Granite 4.1:3b via Ollama) to call a typed MCP tool against a real
+Red Hat UBI9 container. Recorded with [asciinema](https://asciinema.org),
+converted with [agg](https://github.com/asciinema/agg).
+
+## One-time setup
+
+```bash
+brew install asciinema agg
+docker pull redhat/ubi9-minimal      # or rely on first-run pull during setup
+ollama pull granite4.1:3b
+```
+
+The model needs to be present in Ollama before recording.
 
 ## Regenerate
 
-From the repo root:
-
 ```bash
+# Build the UBI9 SSH container + generate profile/mcp.json under /tmp:
+./docs/recording/setup-demo-env.sh
+
+# Record the session and convert:
 rm -f docs/assets/demo.cast docs/assets/demo.gif
 asciinema rec docs/assets/demo.cast -c "bash docs/recording/demo.sh" \
-  --rows 40 --cols 115 --overwrite
-agg --theme monokai --speed 1.5 --font-size 18 \
+  --rows 38 --cols 115 --overwrite
+agg --theme monokai --speed 1.6 --font-size 16 \
   docs/assets/demo.cast docs/assets/demo.gif
+
+# Optional: tear down the demo container when done
+docker rm -f rocannon-demo-ubi9
 ```
 
 Commit both `demo.cast` (replayable on asciinema.org) and `demo.gif`
 (embedded in the README).
 
-## Prerequisites
+## What the demo shows
+
+1. ASCII splash (matches `rocannon repl`'s boot banner).
+2. `docker ps` proving a real `redhat/ubi9-minimal` container is running.
+3. `cat /tmp/rocannon-demo-env/profile.yml` showing the loaded module set.
+4. `mcphost` invocation with a natural-language prompt.
+5. Granite picks `ansible.builtin.command`, calls it through the rocannon
+   MCP server against the UBI9 target, gets back structured output, and
+   summarizes the Linux distribution in one sentence.
+
+## Switching models
 
 ```bash
-brew install asciinema agg
+ROCANNON_DEMO_MODEL=ollama:granite4.1:8b-q3_K_M ./docs/recording/demo.sh
+ROCANNON_DEMO_MODEL=openai:gpt-4o-mini ./docs/recording/demo.sh
 ```
 
-The `demo.sh` script also needs:
+The 3B model is the smallest one with reliable tool calling. Larger Granite
+variants and most cloud frontier models work, but 8B on CPU can take minutes
+per response.
 
-- `uv` (the project itself runs via `uv run`)
-- `tofu` on PATH (the quickstart profile loads the Terraform cannon at startup)
-- `ansible-doc` on PATH (the Ansible cannon's startup reflection)
+## Why not vhs
 
-## Why asciinema and not vhs
-
-We tried vhs first. vhs 0.11 on macOS Tahoe spawns a shell that doesn't echo
-typed input to the rendered frames (a ttyd/chromium compatibility issue at
-that combination of versions). Even vhs's own canonical example produced a
-blank GIF. asciinema records the actual session output directly, no PTY
-emulation, no chromium.
-
-## Tweaking the script
-
-`demo.sh` runs a sequence of `rocannon` CLI calls with `sleep` between them so
-each result is readable in the animation. To change what's shown:
-
-- The opening title card is the ANSI-cyan splash followed by a one-line
-  tagline. The splash is the same string baked into the REPL's boot output.
-- Each `step "..."` line prints a fake prompt + command, then the next line
-  runs the actual command. Add or remove steps to change pace.
-- `agg`'s `--speed 1.5` plays back 1.5x faster than realtime; tune to taste.
+We tried vhs 0.11 first. On macOS Tahoe, the shell vhs spawns via ttyd
+doesn't echo typed input to the rendered frames, even vhs's own canonical
+example produces a blank GIF. asciinema records actual session output
+directly with no PTY emulation layer.

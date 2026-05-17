@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
-# Driver for the README demo. Recorded with asciinema; see docs/recording/README.md.
+# Driver for the README demo. Runs once setup-demo-env.sh has built the UBI9
+# container and written /tmp/rocannon-demo-env/{profile,mcp.json,hosts.ini}.
+# Recorded with asciinema; see docs/recording/README.md.
 
 set -e
-cd "$(dirname "$0")/../../examples/quickstart"
 
-step() {
-  printf '\n\033[1;36m$\033[0m %s\n' "$1"
-  sleep 0.4
-}
+ENV_DIR="/tmp/rocannon-demo-env"
+MODEL="${ROCANNON_DEMO_MODEL:-ollama:granite4.1:3b}"
 
-# Title card: fender wordmark + tagline
+if [[ ! -f "$ENV_DIR/mcp.json" ]]; then
+  echo "Run docs/recording/setup-demo-env.sh first." >&2
+  exit 1
+fi
+
+# Title card
 printf '\033[36m'
 cat <<'SPLASH'
 
@@ -21,22 +25,24 @@ cat <<'SPLASH'
 
 SPLASH
 printf '\033[0m  Ansible, Terraform, Helm as typed MCP tools.\n'
-sleep 2.5
-
-step "rocannon mcp doctor --profile profile.yml"
-uv run rocannon mcp doctor --profile profile.yml
 sleep 2
 
-step "rocannon doc ansible.builtin.ping"
-uv run rocannon doc ansible.builtin.ping
-sleep 2
+printf '\n\033[1;36m$\033[0m docker ps --filter name=rocannon-demo --format "{{.Names}} {{.Image}} {{.Status}}"\n'
+sleep 0.3
+docker ps --filter name=rocannon-demo --format "{{.Names}}  {{.Image}}  {{.Status}}"
+sleep 1.5
 
-step "rocannon run ansible.builtin.ping --target localhost -i hosts --pretty"
-uv run rocannon run ansible.builtin.ping --target localhost -i hosts --pretty
-sleep 2
+printf '\n\033[1;36m$\033[0m cat /tmp/rocannon-demo-env/profile.yml\n'
+sleep 0.3
+cat "$ENV_DIR/profile.yml"
+sleep 1.5
 
-step "rocannon ls modules --profile profile.yml | head"
-uv run rocannon ls modules --profile profile.yml | head
-sleep 2
+printf '\n\033[1;36m$\033[0m mcphost --config mcp.json --model %s --compact \\\n' "$MODEL"
+printf '       -p "On ubi9, run cat /etc/os-release via ansible.builtin.command.\n'
+printf '           Tell me what Linux it is."\n'
+sleep 0.8
 
-printf '\n'
+mcphost --config "$ENV_DIR/mcp.json" --model "$MODEL" --max-steps 5 --compact \
+  -p "On the ubi9 host, use ansible.builtin.command to run 'cat /etc/os-release | head -5'. Then tell me what Linux distribution it is in one sentence."
+
+sleep 1

@@ -122,7 +122,26 @@ class Config(BaseModel):
 
 
 def load_profile(path: Path, transport: str = "stdio") -> Config:
-    """Load a YAML profile file into a Config object."""
+    """Load a YAML profile file. Relative paths inside the profile resolve
+    against the profile file's directory, not the process CWD."""
     raw = yaml.safe_load(path.read_text())
     raw.setdefault("transport", transport)
+    base = path.resolve().parent
+
+    def resolve(p: str) -> str:
+        pp = Path(p)
+        return str(pp if pp.is_absolute() else (base / pp))
+
+    if "inventories" in raw:
+        raw["inventories"] = [resolve(p) for p in raw["inventories"]]
+    for key in ("ansible_cfg", "vault_password_file"):
+        if raw.get(key):
+            raw[key] = resolve(raw[key])
+    tf = raw.get("terraform") or {}
+    if tf.get("workspace"):
+        tf["workspace"] = resolve(tf["workspace"])
+    helm = raw.get("helm") or {}
+    if helm.get("kubeconfig"):
+        helm["kubeconfig"] = resolve(helm["kubeconfig"])
+
     return Config(**raw)

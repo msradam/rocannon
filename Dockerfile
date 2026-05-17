@@ -13,7 +13,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 COPY src/ src/
-RUN uv sync --locked --no-dev --no-cache
+RUN uv sync --locked --no-dev --no-cache --extra ansible --extra ai --extra otel
 
 
 FROM ${BASE_REGISTRY}/python:${PYTHON_VERSION}-slim-bookworm AS runtime

@@ -96,7 +96,7 @@ class AnsibleCannon(Cannon):
             )
 
         # Ansible-specific resources (inventory + per-module schema).
-        # Cross-cannon save/replay machinery lives in server.py now.
+        # Cross-cannon save/replay machinery lives in server.py.
         _add_resources(mcp, inv, schema_cache, services.history)
         metrics.resources_registered = 4  # inventory + module + runs + runs/{id}
 

@@ -1,177 +1,301 @@
+<img src="docs/assets/gryphon.png" alt="" width="96" align="left">
+
 # Rocannon
 
-Ansible modules as MCP tools — automatically.
+Rocannon registers Ansible modules, Terraform resources, Terraform registry
+modules, and Helm charts as typed MCP tools. One server, three catalogs, every
+operation auto-discovered from upstream.
 
-Rocannon reads `ansible-doc` schemas at startup and registers every installed Ansible module as an MCP tool. No module-specific code. The LLM sees tool definitions with parameter names, types, and descriptions; Rocannon passes `module_args` through to `ansible-runner` and returns structured results.
+<br clear="left">
 
-**653 modules tested across 3 collections (ansible.builtin, community.general, ibm.ibm_zos_core) at 100% registration rate.**
+![demo](docs/assets/demo.gif)
 
-## Prerequisites
+## What it is
 
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/) for environment management
-- Ansible collections you want to expose (ansible.builtin ships with ansible-core)
+Rocannon is an MCP server. It reads `ansible-doc`, `tofu providers schema`, and
+`helm show chart` at startup and builds typed function definitions for every
+operation in the catalogs you load. An MCP client (Claude Desktop, Cursor,
+mcphost, any custom agent) sees them as ordinary tools with required arguments,
+types, and descriptions.
 
-## Quick Start
+Why typed tools instead of code generation:
+
+- LLMs cannot invent argument names that the schema rejects.
+- Required arguments are enforced by Pydantic before the call is dispatched.
+- Results come back as structured JSON, not parsed text.
+- The same surface works for Ansible modules, Terraform resources, Terraform
+  registry modules, and Helm charts. No per-operation glue code.
+
+It also works without an LLM. Rocannon ships a REPL that calls the same MCP
+server in-process. Tab completion, structured output, history.
+
+## Install
 
 ```bash
-# Clone and install
-git clone <repo-url> rocannon
-cd rocannon
-uv sync
+# Core install (no cannons enabled, useful for `rocannon doctor`):
+pip install rocannon
 
-# Start the MCP server
-uv run rocannon serve --profile profiles/local-dev.yml
+# Pick the cannons you want:
+pip install 'rocannon[ansible]'         # adds ansible-core + ansible-runner
+pip install 'rocannon[terraform]'       # adds python-hcl2 (needs `tofu` on PATH)
+pip install 'rocannon[helm]'            # needs `helm` on PATH
+pip install 'rocannon[ansible,terraform,helm]'
+pip install 'rocannon[all]'             # everything, plus litellm + otel
 ```
 
-## Setup on a New Machine
+System binaries (`tofu`, `helm`, `ansible-doc`, `ansible-runner`) are detected
+at startup. If one is missing, `rocannon` exits with the install command for
+your platform.
 
-### 1. Install dependencies
+## Quickstart
+
+Runs against localhost. No SSH, no cloud, no Kubernetes.
 
 ```bash
-uv sync
+# 1. From the rocannon checkout:
+cd examples/quickstart
+
+# 2. Check the toolchain is happy
+rocannon mcp doctor --profile profile.yml
+
+# 3. Start the operator REPL
+rocannon repl --profile profile.yml
 ```
 
-### 2. Create an inventory file
+Inside the REPL:
 
-Create a YAML inventory for your target hosts. Example for z/OS:
+```
+rocannon> .target localhost
+rocannon> ping
+rocannon> command cmd="uptime"
+rocannon> tf_random_string instance=demo length=16 special=false
+rocannon> .history
+rocannon> .save quickstart_session
+rocannon> .exit
+```
+
+After `.save`, the session is persisted to `.rocannon/playbooks/quickstart_session.yml`
+and loads back as an MCP prompt next time the server starts.
+
+The same profile also works as an MCP server:
+
+```bash
+rocannon mcp serve --profile profile.yml
+```
+
+## CLI
+
+```
+rocannon mcp serve     start the MCP server (stdio or http transport)
+rocannon mcp doctor    construct the server in-process and list its tools/resources/prompts
+rocannon repl          interactive shell, drives the in-process MCP server
+rocannon run           call one module ad-hoc (no MCP server, no REPL)
+rocannon doctor        general system health (binaries, env vars, inventory parses)
+rocannon doc <module>  print parsed schema for an Ansible module
+rocannon search <q>    grep Ansible modules by name or description
+rocannon ls            list hosts/groups/modules from a profile
+rocannon playbook      list/show/run saved playbooks
+```
+
+Run `rocannon --help` or `rocannon <command> --help` for details.
+
+## Profile examples
+
+A profile is a YAML file declaring which cannons to load and what they should
+expose. Profiles can mix any combination of the three cannons.
+
+Ansible only:
 
 ```yaml
-# inventories/zos.yml
-all:
-  hosts:
-    lpar1:
-      ansible_host: 10.0.0.1
-      ansible_port: 22
-      ansible_user: IBMUSER
-      ansible_ssh_private_key_file: ~/.ssh/zos_key
-      ansible_python_interpreter: /usr/lpp/IBM/cyp/v3r12/pyz/bin/python3.12
-    lpar2:
-      ansible_host: 10.0.0.2
-      ansible_port: 22
-      ansible_user: IBMUSER
-      ansible_ssh_private_key_file: ~/.ssh/zos_key
-      ansible_python_interpreter: /usr/lpp/IBM/cyp/v3r12/pyz/bin/python3.12
-```
-
-### 3. Install Ansible collections
-
-```bash
-uv run ansible-galaxy collection install ibm.ibm_zos_core
-# or any other collection
-```
-
-### 4. Create a profile
-
-```yaml
-# profiles/zos.yml
 inventories:
-  - ./inventories/zos.yml
+  - ./hosts
 modules:
   - ansible.builtin
+  - community.general
   - ibm.ibm_zos_core
+ansible_cfg: ./ansible.cfg          # optional
+vault_password_file: ~/.vault_pass  # optional
 ```
 
-### 5. Test connectivity
+Terraform only, multi-provider, plus a registry module:
 
-```bash
-uv run ansible -i inventories/zos.yml all -m ping
+```yaml
+terraform:
+  workspace: ./tf-work
+  providers:
+    docker:
+      source: kreuzwerker/docker
+      version: "~> 3.0"
+    "null":                          # quote: unquoted `null` parses to None
+      source: hashicorp/null
+      version: "~> 3.2"
+  modules:
+    - source: cloudposse/label/null
+      version: "0.25.0"
 ```
 
-### 6. Start the server
+Helm only:
 
-```bash
-# stdio transport (for MCP clients)
-uv run rocannon serve --profile profiles/zos.yml
-
-# with debug logging
-uv run rocannon serve --profile profiles/zos.yml --log-level debug
+```yaml
+helm:
+  charts:
+    - name: bitnami/nginx
+      version: "21.0.6"
+    - name: bitnami/redis
+      version: "21.0.6"
+  default_namespace: rocannon-demo
 ```
 
-### 7. Connect an MCP client
+All three:
 
-**Claude Code / Claude Desktop** — add to `.mcp.json`:
+```yaml
+inventories: [./hosts]
+modules: [ansible.builtin.ping, ansible.builtin.command]
+
+terraform:
+  workspace: ./tf-work
+  providers:
+    docker: { source: kreuzwerker/docker, version: "~> 3.0" }
+
+helm:
+  charts:
+    - { name: bitnami/nginx, version: "21.0.6" }
+```
+
+## MCP clients
+
+Rocannon speaks the standard MCP protocol over stdio or HTTP. Any MCP client
+works.
+
+### Claude Desktop / Claude Code / Cursor
+
+Add to `.mcp.json` (or the client's equivalent):
 
 ```json
 {
   "mcpServers": {
     "rocannon": {
-      "command": "uv",
+      "command": "env",
       "args": [
-        "run", "--directory", "/path/to/rocannon",
-        "rocannon", "serve", "--profile", "/path/to/rocannon/profiles/zos.yml"
+        "ROCANNON_DATA_DIR=/path/to/your/project",
+        "rocannon", "mcp", "serve",
+        "--profile", "/path/to/profile.yml"
       ]
     }
   }
 }
 ```
 
-**mcphost with a local Ollama model** — interactive agent loop from the terminal:
+`ROCANNON_DATA_DIR` controls where saved playbooks land. Without it, they go
+into the rocannon process's working directory.
 
-Prerequisites: [Ollama](https://ollama.com) installed and running, model pulled (`ollama pull ibm/granite4:micro`).
+### mcphost (terminal MCP client)
 
-```bash
-# 1. Install mcphost — pick your platform from:
-#    https://github.com/mark3labs/mcphost/releases/latest
-#    Example for macOS arm64:
-curl -sL https://github.com/mark3labs/mcphost/releases/latest/download/mcphost_Darwin_arm64.tar.gz \
-  | tar xz && mv mcphost /usr/local/bin/
-
-# 2. Configure — mcphost reads ~/.mcphost.yml by default
-cp .mcphost.yml.example ~/.mcphost.yml
-# Edit ~/.mcphost.yml: replace /path/to/rocannon with your actual path
-#   and set --profile to the profile you want (e.g. profiles/local-dev.yml)
-
-# 3. Start an interactive session
-mcphost -m ollama:ibm/granite4:micro
-
-# Or run a single non-interactive prompt
-mcphost -m ollama:ibm/granite4:micro -p "what OS is running on the ubuntu host?"
-```
-
-mcphost starts Rocannon as a stdio subprocess, loads all registered tools, and runs a multi-turn agent loop. Granite selects tools, Rocannon executes them via Ansible, results come back as structured JSON. Type natural language — no playbooks needed.
-
-**vLLM or any OpenAI-compatible endpoint** — point mcphost at it with `--provider-url`:
+Works with any model mcphost supports. Ollama example:
 
 ```bash
-mcphost -m openai:ibm-granite/granite-3.3-8b-instruct \
-  --provider-url http://your-vllm-host:8000/v1 \
-  --provider-api-key x
+mcphost --config .mcp.json --model ollama:granite4.1:3b -p "ping localhost"
 ```
 
-The model name must match what vLLM was started with (`--served-model-name`). The API key is required by the client but vLLM ignores it unless you configure auth.
+## REPL (non-AI operator mode)
 
-## CLI Reference
+The REPL is a plain shell for the same MCP tools an LLM would see. Useful when
+you want to call modules directly without an LLM in the loop.
 
 ```
-rocannon serve [OPTIONS]
-
-Options:
-  --profile PATH       YAML profile file (inventories + modules)
-  --inventory PATH     Inventory file, repeatable (alt to --profile)
-  --modules TEXT       Module/collection/namespace, repeatable (alt to --profile)
-  --transport TEXT     stdio or http [default: stdio]
-  --log-level TEXT     DEBUG, INFO, WARNING, ERROR [default: INFO]
+rocannon> .help                    show commands
+rocannon> .target webhosts         set a default target (Ansible only)
+rocannon> .inventory               list hosts and groups
+rocannon> .modules                 list every registered tool
+rocannon> .doc copy                show the schema for ansible.builtin.copy
+rocannon> .history                 recent calls this session
+rocannon> .save my_runbook         persist this session as a playbook
+rocannon> .ai <prompt>             optional: drive the same tools via litellm
+rocannon> .exit                    leave (also ctrl-d)
 ```
 
-`--profile` and `--inventory/--modules` are mutually exclusive. Use profiles for reproducibility.
+Module calls use shell-style key=value syntax with shlex quoting:
 
-## How It Works
+```
+rocannon> ansible.builtin.command target=h1 cmd="systemctl status nginx"
+rocannon> tf_docker_image instance=alpine name=alpine:3.20
+rocannon> helm_install_bitnami_nginx release_name=web namespace=prod values='{"replicaCount": 2}'
+```
 
-1. **Startup**: Reads `ansible-doc --list -j` to expand collection specs (e.g. `ibm.ibm_zos_core`) into individual module names
-2. **Registration**: For each module, runs `ansible-doc -j <module>` and extracts parameter schemas → registers as MCP tool
-3. **Execution**: When a tool is called, validates the host against loaded inventories, serializes `module_args`, and runs via `ansible-runner`
-4. **Result**: Parses ansible-runner events and returns `{status, changed, result, stdout, stderr}`
+Short names resolve to FQCN, preferring `ansible.builtin`:
 
-## Security
+```
+rocannon> ping target=h1            # → ansible.builtin.ping
+```
 
-Hosts are validated against loaded inventories before any execution. If a host isn't in an inventory file, the call is rejected. Privilege escalation (become) is configured in the inventory, not at runtime.
+The `.ai` mode is optional and off by default. It uses litellm so the backend
+is up to the operator (Ollama, OpenAI, Anthropic, watsonx, vLLM, etc., picked
+via `ROCANNON_AI_MODEL`).
 
-## Architecture
+## Cannons (the plugin model)
 
-Rocannon has three stages at startup and one at runtime:
+A *cannon* is the registration layer for one upstream catalog. Each cannon
+reflects schemas, builds typed function signatures, and registers them on the
+FastMCP server.
 
-1. **Expand** — `ansible-doc --list -j` turns collection/namespace specs (e.g. `ibm.ibm_zos_core`) into individual module FQCNs
-2. **Introspect** — `ansible-doc -j <module>` for each FQCN extracts parameter names, types, defaults, choices, and descriptions
-3. **Register** — each module becomes a FastMCP tool with a fully typed Python signature; the `target` parameter is constrained to a `Literal` of known hosts/groups
-4. **Execute** — tool calls serialize `module_args` into a temporary playbook and run it via `ansible-runner`; results are parsed from runner events and returned as structured JSON
+| Cannon | Catalog source | Tool name pattern |
+|---|---|---|
+| `AnsibleCannon` | `ansible-doc -j <module>` | `ansible.builtin.copy`, `community.general.docker_container` |
+| `TerraformCannon` | `tofu providers schema -json` + `variables.tf` | `tf_docker_container`, `tf_module_aws_vpc` |
+| `HelmCannon` | `helm show chart` | `helm_install_bitnami_nginx` |
+
+All cannons share one set of cross-cutting services: audit middleware,
+correlation IDs, response size limits, retry on transient errors, history
+buffer for save/replay.
+
+The `Cannon` base class (`rocannon.cannons.Cannon`) is the extension point.
+Adding a fourth cannon means implementing one `register(mcp, services)` method.
+
+## Saved playbooks (cross-cannon)
+
+Two tools register at the server level regardless of which cannons are loaded:
+
+- `save_playbook(name, description, steps, overwrite)` writes a playbook YAML
+  to `$ROCANNON_DATA_DIR/.rocannon/playbooks/<name>.yml`.
+- `commit_session(name, description, since)` materializes this session's
+  successful tool calls into a playbook.
+
+On the next server start, every saved playbook becomes an MCP prompt named
+`playbook_<name>`. Step format is `{tool, args}`, so a playbook can mix
+Ansible, Terraform, and Helm calls.
+
+If the upstream catalog changes between save and load (provider upgrades,
+module rename), the playbook is skipped with a warning, not registered as a
+half-broken prompt.
+
+## Development
+
+```bash
+git clone <repo> rocannon
+cd rocannon
+uv sync                            # installs all dev deps
+uv run pytest                      # unit tests
+uv run pytest -m integration       # opt-in: real docker, kind, tofu, helm
+uv run ruff check
+uv run mypy src/rocannon
+```
+
+The integration suite is opt-in because it spins up real containers and talks
+to a local kind cluster. Prereqs (any missing auto-skips the test):
+
+- Docker daemon reachable
+- `tofu` and `helm` on PATH
+- A kind cluster named `rocannon-test`
+
+## The name
+
+Ursula K. Le Guin coined the word "ansible" in her 1966 novel *Rocannon's
+World*. Rocannon was the title character. Calling the engines "cannons" is a
+small pun on the name.
+
+The gryphon at the top is a nod to the Windsteeds that Rocannon and his
+companions ride in the novel.
+
+## Credits
+
+- Gryphon icon: [Gryphon by Aleksei Kovalenko from Noun Project](https://thenounproject.com/icon/gryphon-7096619/) (CC BY 3.0).

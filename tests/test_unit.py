@@ -13,9 +13,30 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from rocannon.config import Config, load_profile
-from rocannon.executor import _parse_runner_result, run_module
+from rocannon.correlation import (
+    CorrelationFormatter,
+    get_request_id,
+    new_request_id,
+    reset_request_id,
+    set_request_id,
+)
+from rocannon.executor import (
+    DEFAULT_IDLE_TIMEOUT,
+    DEFAULT_TIMEOUT,
+    _parse_runner_result,
+    build_envvars,
+    resolve_idle_timeout,
+    resolve_timeout,
+    run_module,
+)
 from rocannon.inventory import load_inventory
-from rocannon.schema import ANSIBLE_TYPE_MAP, expand_modules, fetch_module_schema
+from rocannon.redaction import REDACTED, redact, redact_text
+from rocannon.schema import (
+    ANSIBLE_TYPE_MAP,
+    SchemaFetchError,
+    expand_modules,
+    fetch_module_schema,
+)
 
 # ---------------------------------------------------------------------------
 # config.py
@@ -34,15 +55,19 @@ class TestConfig:
         with pytest.raises(ValueError, match="Inventory file not found"):
             Config(inventories=[Path("/nonexistent/inv.yml")], modules=["ansible.builtin.ping"])
 
-    def test_empty_modules_raises(self, tmp_path: Path) -> None:
+    def test_partial_ansible_modules_only_raises(self, tmp_path: Path) -> None:
         inv = tmp_path / "inv.yml"
         inv.write_text("all:\n  hosts:\n    localhost:\n")
-        with pytest.raises(ValueError, match="At least one module"):
+        with pytest.raises(ValueError, match="Partial Ansible config"):
             Config(inventories=[inv], modules=[])
 
-    def test_empty_inventories_raises(self) -> None:
-        with pytest.raises(ValueError, match="At least one inventory"):
+    def test_partial_ansible_inventories_only_raises(self) -> None:
+        with pytest.raises(ValueError, match="Partial Ansible config"):
             Config(inventories=[], modules=["ansible.builtin.ping"])
+
+    def test_no_cannon_configured_raises(self) -> None:
+        with pytest.raises(ValueError, match="No cannon configured"):
+            Config()
 
     def test_load_profile(self, tmp_path: Path) -> None:
         inv = tmp_path / "inv.yml"
@@ -52,6 +77,40 @@ class TestConfig:
         config = load_profile(profile)
         assert config.transport == "stdio"
         assert config.modules == ["ansible.builtin.ping"]
+
+    def test_ansible_cfg_must_exist(self, tmp_path: Path) -> None:
+        inv = tmp_path / "inv.yml"
+        inv.write_text("all:\n  hosts:\n    h:\n")
+        with pytest.raises(ValueError, match="file not found"):
+            Config(
+                inventories=[inv],
+                modules=["ansible.builtin.ping"],
+                ansible_cfg=Path("/nonexistent/ansible.cfg"),
+            )
+
+    def test_ansible_cfg_resolves_to_absolute(self, tmp_path: Path) -> None:
+        inv = tmp_path / "inv.yml"
+        inv.write_text("all:\n  hosts:\n    h:\n")
+        cfg_file = tmp_path / "ansible.cfg"
+        cfg_file.write_text("[defaults]\n")
+        config = Config(
+            inventories=[inv],
+            modules=["ansible.builtin.ping"],
+            ansible_cfg=cfg_file,
+            vault_password_file=cfg_file,
+        )
+        assert config.ansible_cfg is not None and config.ansible_cfg.is_absolute()
+        assert config.vault_password_file is not None and config.vault_password_file.is_absolute()
+
+    def test_per_module_timeouts(self, tmp_path: Path) -> None:
+        inv = tmp_path / "inv.yml"
+        inv.write_text("all:\n  hosts:\n    localhost:\n")
+        config = Config(
+            inventories=[inv],
+            modules=["ansible.builtin.copy"],
+            timeouts={"ansible.builtin.copy": 1800},
+        )
+        assert config.timeouts["ansible.builtin.copy"] == 1800
 
     def test_load_profile_transport_override(self, tmp_path: Path) -> None:
         inv = tmp_path / "inv.yml"
@@ -221,31 +280,46 @@ class TestFetchModuleSchema:
         assert len(schema["parameters"]) == 1
         assert schema["parameters"][0]["name"] == "data"
 
-    def test_subprocess_failure_returns_stub(self) -> None:
+    def test_subprocess_failure_raises(self) -> None:
         completed = MagicMock()
         completed.returncode = 1
         completed.stderr = "error"
         completed.stdout = ""
-        with patch("rocannon.schema.subprocess.run", return_value=completed):
-            schema = fetch_module_schema("bad.module.name")
-        assert schema["parameters"] == []
-        assert schema["name"] == "bad.module.name"
+        with (
+            patch("rocannon.schema.subprocess.run", return_value=completed),
+            pytest.raises(SchemaFetchError, match="ansible-doc failed"),
+        ):
+            fetch_module_schema("bad.module.name")
 
-    def test_invalid_json_returns_stub(self) -> None:
+    def test_invalid_json_raises(self) -> None:
         completed = MagicMock()
         completed.returncode = 0
         completed.stdout = "not json"
-        with patch("rocannon.schema.subprocess.run", return_value=completed):
-            schema = fetch_module_schema("ansible.builtin.ping")
-        assert schema["parameters"] == []
+        with (
+            patch("rocannon.schema.subprocess.run", return_value=completed),
+            pytest.raises(SchemaFetchError, match="Failed to parse"),
+        ):
+            fetch_module_schema("ansible.builtin.ping")
 
-    def test_module_not_in_doc_returns_stub(self) -> None:
+    def test_module_not_in_doc_raises(self) -> None:
         completed = MagicMock()
         completed.returncode = 0
         completed.stdout = json.dumps({"some.other.module": {}})
-        with patch("rocannon.schema.subprocess.run", return_value=completed):
-            schema = fetch_module_schema("ansible.builtin.ping")
-        assert schema["parameters"] == []
+        with (
+            patch("rocannon.schema.subprocess.run", return_value=completed),
+            pytest.raises(SchemaFetchError, match="not present"),
+        ):
+            fetch_module_schema("ansible.builtin.ping")
+
+    def test_empty_stdout_raises(self) -> None:
+        completed = MagicMock()
+        completed.returncode = 0
+        completed.stdout = "   "
+        with (
+            patch("rocannon.schema.subprocess.run", return_value=completed),
+            pytest.raises(SchemaFetchError, match="empty output"),
+        ):
+            fetch_module_schema("ansible.builtin.ping")
 
     def test_required_parameter_flagged(self) -> None:
         doc = {
@@ -300,7 +374,7 @@ class TestFetchModuleSchema:
 
 
 # ---------------------------------------------------------------------------
-# executor.py — _parse_runner_result
+# executor.py, _parse_runner_result
 # ---------------------------------------------------------------------------
 
 
@@ -366,6 +440,44 @@ class TestParseRunnerResult:
         )
         result = _parse_runner_result(runner)
         assert "hosts" not in result
+        assert result["status"] == "successful"
+
+    def test_multi_host_status_failed_when_any_rc_nonzero(self) -> None:
+        runner = _make_runner(
+            events=[_host_event("h1", rc=0), _host_event("h2", rc=2)],
+            status="successful",
+        )
+        result = _parse_runner_result(runner)
+        assert result["status"] == "failed"
+
+    def test_multi_host_status_failed_on_failed_flag(self) -> None:
+        events = [
+            _host_event("h1"),
+            {"event_data": {"host": "h2", "res": {"failed": True, "msg": "boom"}}},
+        ]
+        runner = _make_runner(events=events, status="successful")
+        result = _parse_runner_result(runner)
+        assert result["status"] == "failed"
+
+    def test_multi_host_status_failed_on_unreachable(self) -> None:
+        events = [
+            _host_event("h1"),
+            {"event_data": {"host": "h2", "res": {"unreachable": True, "msg": "ssh err"}}},
+        ]
+        runner = _make_runner(events=events, status="successful")
+        result = _parse_runner_result(runner)
+        assert result["status"] == "failed"
+
+    def test_single_host_status_failed_when_rc_nonzero(self) -> None:
+        runner = _make_runner(events=[_host_event("h1", rc=1)], status="successful")
+        result = _parse_runner_result(runner)
+        assert result["status"] == "failed"
+
+    def test_multi_host_status_preserved_when_all_ok(self) -> None:
+        runner = _make_runner(
+            events=[_host_event("h1"), _host_event("h2")], status="successful"
+        )
+        result = _parse_runner_result(runner)
         assert result["status"] == "successful"
 
     def test_changed_true_if_any_host_changed(self) -> None:
@@ -439,6 +551,153 @@ class TestRunModule:
         assert captured
         assert not Path(captured[0]).exists()
 
+    def test_envvars_passed_to_runner(self, tmp_path: Path) -> None:
+        runner = _make_runner(events=[_host_event("h1")])
+        with patch("rocannon.executor.ansible_runner.run", return_value=runner) as mock_run:
+            run_module(
+                module="ansible.builtin.ping",
+                module_args={},
+                inventory=[str(tmp_path)],
+                host_pattern="h1",
+                envvars={"ANSIBLE_VAULT_PASSWORD_FILE": "/x"},
+            )
+        assert mock_run.call_args[1]["envvars"] == {"ANSIBLE_VAULT_PASSWORD_FILE": "/x"}
+
+    def test_env_timeout_used_when_no_override(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ROCANNON_TIMEOUT", "42")
+        monkeypatch.setenv("ROCANNON_IDLE_TIMEOUT", "7")
+        runner = _make_runner(events=[_host_event("localhost")])
+        with patch("rocannon.executor.ansible_runner.run", return_value=runner) as mock_run:
+            run_module(
+                module="ansible.builtin.ping",
+                module_args={},
+                inventory=[str(tmp_path)],
+                host_pattern="localhost",
+            )
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs["timeout"] == 42
+        assert call_kwargs["settings"]["idle_timeout"] == 7
+
+    def test_explicit_timeout_overrides_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ROCANNON_TIMEOUT", "42")
+        runner = _make_runner(events=[_host_event("localhost")])
+        with patch("rocannon.executor.ansible_runner.run", return_value=runner) as mock_run:
+            run_module(
+                module="ansible.builtin.ping",
+                module_args={},
+                inventory=[str(tmp_path)],
+                host_pattern="localhost",
+                timeout=999,
+            )
+        assert mock_run.call_args[1]["timeout"] == 999
+
+    def test_invalid_env_falls_back_to_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ROCANNON_TIMEOUT", "not-an-int")
+        monkeypatch.setenv("ROCANNON_IDLE_TIMEOUT", "")
+        assert resolve_timeout() == DEFAULT_TIMEOUT
+        assert resolve_idle_timeout() == DEFAULT_IDLE_TIMEOUT
+
+
+class TestBuildEnvvars:
+    def test_inherits_ansible_and_zoau_prefixes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ANSIBLE_BECOME_PASS", "secret")
+        monkeypatch.setenv("ZOAU_HOME", "/usr/lpp/IBM/zoautil")
+        monkeypatch.setenv("HOME", "/Users/amsrahman")  # should NOT be inherited
+        env = build_envvars()
+        assert env["ANSIBLE_BECOME_PASS"] == "secret"
+        assert env["ZOAU_HOME"] == "/usr/lpp/IBM/zoautil"
+        assert "HOME" not in env
+
+    def test_ansible_cfg_and_vault_set_canonical_names(self) -> None:
+        env = build_envvars(
+            ansible_cfg=Path("/etc/ansible.cfg"),
+            vault_password_file=Path("/root/.vault_pass"),
+        )
+        assert env["ANSIBLE_CONFIG"] == "/etc/ansible.cfg"
+        assert env["ANSIBLE_VAULT_PASSWORD_FILE"] == "/root/.vault_pass"
+
+    def test_extra_envvars_override_profile_fields(self) -> None:
+        env = build_envvars(
+            extra_envvars={"ANSIBLE_CONFIG": "/override/path"},
+            ansible_cfg=Path("/etc/ansible.cfg"),
+        )
+        assert env["ANSIBLE_CONFIG"] == "/override/path"
+
+    def test_no_extra_when_empty(self) -> None:
+        env = build_envvars()
+        # Only inherited env vars should be present (test env may or may not have them)
+        for k in env:
+            assert k.startswith(("ANSIBLE_", "ZOAU_"))
+
+    def test_exception_stderr_is_redacted(self, tmp_path: Path) -> None:
+        with patch(
+            "rocannon.executor.ansible_runner.run",
+            side_effect=RuntimeError("ssh failed: password=hunter2"),
+        ):
+            result = run_module(
+                module="ansible.builtin.ping",
+                module_args={},
+                inventory=[str(tmp_path)],
+                host_pattern="localhost",
+            )
+        assert "hunter2" not in result["stderr"]
+        assert REDACTED in result["stderr"]
+
+    def test_parse_redacts_sensitive_keys_in_result(self) -> None:
+        events = [
+            {
+                "event_data": {
+                    "host": "h1",
+                    "res": {
+                        "changed": False,
+                        "rc": 0,
+                        "stdout": "ok",
+                        "stderr": "",
+                        "invocation": {
+                            "module_args": {
+                                "url": "https://api/x",
+                                "api_token": "abc123",
+                                "password": "p@ss",
+                            }
+                        },
+                    },
+                }
+            }
+        ]
+        runner = _make_runner(events=events)
+        result = _parse_runner_result(runner)
+        args = result["result"]["invocation"]["module_args"]
+        assert args["url"] == "https://api/x"
+        assert args["api_token"] == REDACTED
+        assert args["password"] == REDACTED
+
+    def test_parse_redacts_stdout_stderr_inline_secrets(self) -> None:
+        events = [
+            {
+                "event_data": {
+                    "host": "h1",
+                    "res": {
+                        "changed": False,
+                        "rc": 0,
+                        "stdout": "running curl --token deadbeef http://x",
+                        "stderr": "PASSWORD=hunter2 invalid",
+                    },
+                }
+            }
+        ]
+        runner = _make_runner(events=events)
+        result = _parse_runner_result(runner)
+        assert "deadbeef" not in result["stdout"]
+        assert "hunter2" not in result["stderr"]
+        assert REDACTED in result["stdout"]
+        assert REDACTED in result["stderr"]
+
     def test_tempfile_cleaned_up_on_exception(self, tmp_path: Path) -> None:
         captured: list[str] = []
 
@@ -456,3 +715,161 @@ class TestRunModule:
 
         assert captured
         assert not Path(captured[0]).exists()
+
+
+# ---------------------------------------------------------------------------
+# server._ConcurrencyMiddleware
+# ---------------------------------------------------------------------------
+
+
+class TestConcurrencyMiddleware:
+    @staticmethod
+    def _fake_context(target: str) -> Any:
+        msg = MagicMock()
+        msg.arguments = {"target": target}
+        ctx = MagicMock()
+        ctx.message = msg
+        return ctx
+
+    async def test_per_host_semaphore_reused(self) -> None:
+        from rocannon.server import _ConcurrencyMiddleware
+
+        mw = _ConcurrencyMiddleware(max_concurrent=10, max_per_host=3)
+        sem_a1 = mw._get_host("a")
+        sem_a2 = mw._get_host("a")
+        mw._get_host("b")
+        assert set(mw._per_host.keys()) == {"a", "b"}
+        assert sem_a1 is sem_a2
+
+    async def test_per_host_cap_blocks_third(self) -> None:
+        import asyncio
+
+        from rocannon.server import _ConcurrencyMiddleware
+
+        mw = _ConcurrencyMiddleware(max_concurrent=10, max_per_host=2)
+        in_flight = 0
+        peak = 0
+        gate = asyncio.Event()
+
+        async def fake_call_next(_ctx: Any) -> str:
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            await gate.wait()
+            in_flight -= 1
+            return "ok"
+
+        ctx = self._fake_context("h1")
+        tasks = [asyncio.create_task(mw.on_call_tool(ctx, fake_call_next)) for _ in range(5)]
+        # Give tasks a chance to acquire semaphores
+        await asyncio.sleep(0.05)
+        assert peak == 2  # only two ran concurrently on h1
+        gate.set()
+        await asyncio.gather(*tasks)
+
+    async def test_global_cap_independent_of_host(self) -> None:
+        import asyncio
+
+        from rocannon.server import _ConcurrencyMiddleware
+
+        mw = _ConcurrencyMiddleware(max_concurrent=2, max_per_host=10)
+        in_flight = 0
+        peak = 0
+        gate = asyncio.Event()
+
+        async def fake_call_next(_ctx: Any) -> str:
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            await gate.wait()
+            in_flight -= 1
+            return "ok"
+
+        # Different hosts, so per-host cap doesn't bind
+        tasks = [
+            asyncio.create_task(mw.on_call_tool(self._fake_context(f"h{i}"), fake_call_next))
+            for i in range(5)
+        ]
+        await asyncio.sleep(0.05)
+        assert peak == 2  # global cap binds across hosts
+        gate.set()
+        await asyncio.gather(*tasks)
+
+
+# ---------------------------------------------------------------------------
+# redaction.py
+# ---------------------------------------------------------------------------
+
+
+class TestCorrelation:
+    def test_default_unset(self) -> None:
+        # In a fresh context the var is None
+        assert get_request_id() is None
+
+    def test_set_and_reset_round_trip(self) -> None:
+        token = set_request_id("abc12345")
+        try:
+            assert get_request_id() == "abc12345"
+        finally:
+            reset_request_id(token)
+        assert get_request_id() is None
+
+    def test_new_request_id_is_unique_hex(self) -> None:
+        ids = {new_request_id() for _ in range(50)}
+        assert len(ids) == 50
+        for rid in ids:
+            assert len(rid) == 8
+            int(rid, 16)  # valid hex
+
+    def test_formatter_injects_request_id(self) -> None:
+        import logging as _logging
+
+        fmt = CorrelationFormatter("[%(request_id)s] %(message)s")
+        record = _logging.LogRecord(
+            "x", _logging.INFO, __file__, 1, "hello", None, None
+        )
+        token = set_request_id("deadbeef")
+        try:
+            assert fmt.format(record) == "[deadbeef] hello"
+        finally:
+            reset_request_id(token)
+
+    def test_formatter_uses_dash_when_unset(self) -> None:
+        import logging as _logging
+
+        fmt = CorrelationFormatter("[%(request_id)s] %(message)s")
+        record = _logging.LogRecord(
+            "x", _logging.INFO, __file__, 1, "hello", None, None
+        )
+        assert fmt.format(record) == "[-] hello"
+
+
+class TestRedaction:
+    def test_redact_dict_sensitive_keys(self) -> None:
+        out = redact(
+            {"user": "alice", "password": "p", "api_token": "t", "nested": {"secret": "s"}}
+        )
+        assert out["user"] == "alice"
+        assert out["password"] == REDACTED
+        assert out["api_token"] == REDACTED
+        assert out["nested"]["secret"] == REDACTED
+
+    def test_redact_list_recurses(self) -> None:
+        out = redact([{"password": "x"}, {"name": "y"}])
+        assert out[0]["password"] == REDACTED
+        assert out[1]["name"] == "y"
+
+    def test_redact_text_key_value_forms(self) -> None:
+        assert "hunter2" not in redact_text("password=hunter2 trailing")
+        assert "hunter2" not in redact_text("PASSWORD: hunter2")
+        assert "deadbeef" not in redact_text("curl --token deadbeef http://x")
+        assert "abc" not in redact_text("api-key=abc")
+
+    def test_redact_text_preserves_non_secret_content(self) -> None:
+        assert redact_text("the user logged in") == "the user logged in"
+        assert redact_text("") == ""
+
+    def test_redact_is_non_mutating(self) -> None:
+        src = {"password": "p", "ok": "v"}
+        redact(src)
+        assert src["password"] == "p"

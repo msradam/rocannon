@@ -15,3 +15,10 @@ dev/inventories/ibmcloud_info.yml
 *_credentials*
 *_secret*
 *_token*
+.rocannon/
+examples/*/tf-work/
+examples/*/.rocannon/
+
+.coverage
+.pytest_cache/
+dev/three_cannon_demo/_work/

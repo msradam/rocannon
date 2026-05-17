@@ -7,7 +7,7 @@ license = "MIT"
 authors = [
     { name = "Adam Munawar Rahman", email = "msrahmanadam@gmail.com" }
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 keywords = ["ansible", "mcp", "model-context-protocol", "automation", "infrastructure", "zos", "ibm"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -15,7 +15,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: System :: Systems Administration",
@@ -23,19 +22,53 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+# Core framework only, every cannon is opt-in via an extra.
 dependencies = [
-    "ansible-core>=2.19.7",
-    "ansible-runner>=2.4.2",
-    "click>=8.1.0",
-    "fastmcp>=3.1.0",
+    "fastmcp>=3.3.1",
+    "prompt_toolkit>=3.0.50",
+    "typer>=0.25.0",
     "pydantic>=2.12.5",
     "pyyaml>=6.0.3",
 ]
 
 [project.optional-dependencies]
-# Install with: pip install rocannon[otel]
-# Then run: OTEL_SERVICE_NAME=rocannon opentelemetry-instrument rocannon serve ...
+# --- Cannons ---
+# `pip install 'rocannon[ansible]'` pulls in ansible-core + ansible-runner.
+ansible = [
+    "ansible-core>=2.20.5",
+    "ansible-runner>=2.4.2",
+]
+# `pip install 'rocannon[terraform]'` pulls in python-hcl2 (needed to parse
+# `variables.tf` for community module reflection). The cannon shells out to
+# `tofu` or `terraform`; rocannon checks for the binary at startup and tells
+# the user how to install it.
+terraform = ["python-hcl2>=8.0"]
+# Same for helm, shells out to the `helm` CLI; no Python deps.
+helm = []
+
+# --- AI ---
+# `pip install 'rocannon[ai]'` enables `.ai` mode in the REPL. Backend is
+# picked per-call via ROCANNON_AI_MODEL (e.g. "watsonx/ibm/granite-3-3-8b-instruct",
+# "ollama/granite4.1:3b", "openai/gpt-4o", "anthropic/claude-sonnet-4-5", …).
+# LiteLLM owns the provider matrix; rocannon stays unopinionated about it.
+ai = [
+    "litellm>=1.50.0",
+]
+
+# --- Observability ---
+# `pip install 'rocannon[otel]'`; run under `opentelemetry-instrument rocannon mcp serve …`
 otel = [
+    "opentelemetry-sdk>=1.26.0",
+    "opentelemetry-exporter-otlp>=1.26.0",
+]
+
+# --- Meta ---
+# `pip install 'rocannon[all]'`, everything.
+all = [
+    "ansible-core>=2.20.5",
+    "ansible-runner>=2.4.2",
+    "python-hcl2>=8.0",
+    "litellm>=1.50.0",
     "opentelemetry-sdk>=1.26.0",
     "opentelemetry-exporter-otlp>=1.26.0",
 ]
@@ -53,24 +86,50 @@ requires = ["uv_build>=0.9.3,<0.10.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
+# `uv sync` installs these alongside the project. Includes every cannon's
+# Python deps so the test suite + lint can run against the full codebase.
 dev = [
+    "ansible-core>=2.20.5",
+    "ansible-runner>=2.4.2",
+    "litellm>=1.50.0",
+    "python-hcl2>=8.0",
     "mypy>=1.19.1",
     "opentelemetry-sdk>=1.26.0",
     "ollama>=0.6.1",
     "pre-commit>=4.5.1",
     "pytest>=8.0",
     "pytest-asyncio>=1.0",
+    "pytest-cov>=5.0",
     "ruff>=0.15.5",
     "types-pyyaml>=6.0.12.20250915",
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+markers = [
+    "integration: end-to-end tests that touch real docker/kind/tofu/helm. Opt-in via `pytest -m integration`.",
+]
+# Default: run unit tests, skip integration. Override with `pytest -m integration`.
+addopts = "-m 'not integration'"
+
+[tool.coverage.run]
+branch = true
+source = ["src/rocannon"]
+omit = ["src/rocannon/__main__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
 
 # --- Ruff ---
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 src = ["src"]
 
 [tool.ruff.lint]
@@ -80,13 +139,16 @@ select = ["E", "W", "F", "I", "N", "UP", "B", "C4", "SIM", "S", "FURB"]
 "tests/**" = ["S101", "S105", "S108", "S110", "S310", "S603", "S607"]
 "src/rocannon/schema.py" = ["S603", "S607"]
 "src/rocannon/inventory.py" = ["S603"]
+"src/rocannon/cli.py" = ["S603", "S607"]
+"src/rocannon/cannons/terraform.py" = ["S603", "S607"]
+"src/rocannon/cannons/helm.py" = ["S603", "S607"]
 
 [tool.ruff.format]
 quote-style = "double"
 
 # --- Mypy ---
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 disallow_untyped_defs = true
 warn_return_any = true

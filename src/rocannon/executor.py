@@ -7,8 +7,66 @@ from typing import Any
 import ansible_runner  # type: ignore[import-untyped]
 import yaml
 
+from rocannon.redaction import redact, redact_text
+
 DEFAULT_TIMEOUT = 300
 DEFAULT_IDLE_TIMEOUT = 60
+
+
+def _env_int(name: str, fallback: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return fallback
+    try:
+        return int(raw)
+    except ValueError:
+        return fallback
+
+
+def resolve_timeout() -> int:
+    """Resolve the default execution timeout from ``ROCANNON_TIMEOUT`` env var."""
+    return _env_int("ROCANNON_TIMEOUT", DEFAULT_TIMEOUT)
+
+
+def resolve_idle_timeout() -> int:
+    """Resolve the default idle timeout from ``ROCANNON_IDLE_TIMEOUT`` env var."""
+    return _env_int("ROCANNON_IDLE_TIMEOUT", DEFAULT_IDLE_TIMEOUT)
+
+
+# Env vars to inherit from the rocannon process into the ansible-runner
+# subprocess by default. ZOAU_* covers z/OS Open Automation Utility credentials
+# used by `ibm.ibm_zos_core`; users on Z setups rely on these being passed
+# through without thinking about it.
+_INHERITED_ENV_PREFIXES: tuple[str, ...] = ("ANSIBLE_", "ZOAU_")
+
+
+def build_envvars(
+    extra_envvars: dict[str, str] | None = None,
+    ansible_cfg: Path | None = None,
+    vault_password_file: Path | None = None,
+) -> dict[str, str]:
+    """Build the envvars dict passed to ``ansible_runner.run``.
+
+    Precedence (lowest → highest):
+
+    1. Process env vars whose name starts with ``ANSIBLE_`` or ``ZOAU_``.
+       Without this, ansible-runner's envvars override drops everything
+       inherited from the shell, surprising and breaks ``ANSIBLE_BECOME_PASS``,
+       ``ZOAU_HOME``, etc.
+    2. Profile fields ``ansible_cfg`` / ``vault_password_file`` mapped to their
+       canonical env var names.
+    3. Explicit ``extra_envvars`` from the profile, last writer wins.
+    """
+    env: dict[str, str] = {
+        k: v for k, v in os.environ.items() if k.startswith(_INHERITED_ENV_PREFIXES)
+    }
+    if ansible_cfg is not None:
+        env["ANSIBLE_CONFIG"] = str(ansible_cfg)
+    if vault_password_file is not None:
+        env["ANSIBLE_VAULT_PASSWORD_FILE"] = str(vault_password_file)
+    if extra_envvars:
+        env.update(extra_envvars)
+    return env
 
 
 def run_module(
@@ -16,10 +74,15 @@ def run_module(
     module_args: dict[str, Any],
     inventory: list[str],
     host_pattern: str,
-    timeout: int = DEFAULT_TIMEOUT,
-    idle_timeout: int = DEFAULT_IDLE_TIMEOUT,
+    timeout: int | None = None,
+    idle_timeout: int | None = None,
+    envvars: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Execute an Ansible module via ansible-runner and return structured results."""
+    if timeout is None:
+        timeout = resolve_timeout()
+    if idle_timeout is None:
+        idle_timeout = resolve_idle_timeout()
     abs_inventory = []
     for inv_path in inventory:
         p = Path(inv_path)
@@ -51,6 +114,7 @@ def run_module(
             quiet=True,
             timeout=timeout,
             settings={"idle_timeout": idle_timeout},
+            envvars=envvars,
         )
     except Exception as exc:
         return {
@@ -58,7 +122,7 @@ def run_module(
             "changed": False,
             "result": {},
             "stdout": "",
-            "stderr": str(exc),
+            "stderr": redact_text(str(exc)),
         }
     finally:
         with contextlib.suppress(Exception):
@@ -87,9 +151,9 @@ def _parse_runner_result(runner: Any) -> dict[str, Any]:
         if res is not None and host is not None:
             host_results[host] = {
                 "changed": res.get("changed", False),
-                "result": res,
-                "stdout": res.get("stdout", ""),
-                "stderr": res.get("stderr", ""),
+                "result": redact(res),
+                "stdout": redact_text(res.get("stdout", "")),
+                "stderr": redact_text(res.get("stderr", "")),
             }
 
     if not host_results:
@@ -97,16 +161,29 @@ def _parse_runner_result(runner: Any) -> dict[str, Any]:
             "status": runner.status,
             "changed": False,
             "result": {},
-            "stdout": runner.stdout.read() if runner.stdout else "",
-            "stderr": runner.stderr.read() if runner.stderr else "",
+            "stdout": redact_text(runner.stdout.read() if runner.stdout else ""),
+            "stderr": redact_text(runner.stderr.read() if runner.stderr else ""),
         }
+
+    status = "failed" if any(_host_failed(h) for h in host_results.values()) else runner.status
 
     if len(host_results) == 1:
         host_data = next(iter(host_results.values()))
-        return {"status": runner.status, **host_data}
+        return {"status": status, **host_data}
 
     return {
-        "status": runner.status,
+        "status": status,
         "changed": any(h["changed"] for h in host_results.values()),
         "hosts": host_results,
     }
+
+
+def _host_failed(host_entry: dict[str, Any]) -> bool:
+    """Return True if this host's Ansible result indicates a failure."""
+    res = host_entry.get("result")
+    if not isinstance(res, dict):
+        return False
+    if res.get("failed") is True or res.get("unreachable") is True:
+        return True
+    rc = res.get("rc")
+    return isinstance(rc, int) and rc != 0

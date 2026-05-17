@@ -4,7 +4,7 @@
       "command": "uv",
       "args": [
         "run", "--directory", "/path/to/rocannon",
-        "rocannon", "serve",
+        "rocannon", "mcp",
         "--profile", "profiles/local-dev.yml"
       ]
     }

@@ -7,6 +7,6 @@ mcpServers:
       - --directory
       - /path/to/rocannon
       - rocannon
-      - serve
+      - mcp
       - --profile
       - /path/to/rocannon/profiles/local-dev.yml

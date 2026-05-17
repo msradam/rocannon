@@ -5,6 +5,10 @@ from typing import Any
 
 logger = logging.getLogger("rocannon.schema")
 
+
+class SchemaFetchError(RuntimeError):
+    """Raised when ``ansible-doc`` cannot return a usable schema for a module."""
+
 ANSIBLE_TYPE_MAP: dict[str, type] = {
     "str": str,
     "string": str,
@@ -48,7 +52,7 @@ def expand_modules(specs: list[str]) -> list[str]:
         )
         all_modules = json.loads(result.stdout)
     except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
-        logger.error("ansible-doc --list failed: %s — returning explicit modules only", exc)
+        logger.error("ansible-doc --list failed: %s, returning explicit modules only", exc)
         return explicit
 
     expanded: list[str] = list(explicit)
@@ -68,22 +72,22 @@ def fetch_module_schema(module_name: str) -> dict[str, Any]:
     )
 
     if result.returncode != 0:
-        logger.warning("ansible-doc failed for %s: %s", module_name, result.stderr.strip())
-        return {"name": module_name, "description": module_name, "parameters": []}
+        raise SchemaFetchError(
+            f"ansible-doc failed for {module_name}: {result.stderr.strip() or 'no stderr'}"
+        )
 
     if not result.stdout.strip():
-        logger.warning("ansible-doc returned empty output for %s", module_name)
-        return {"name": module_name, "description": module_name, "parameters": []}
+        raise SchemaFetchError(f"ansible-doc returned empty output for {module_name}")
 
     try:
         doc = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
-        logger.warning("Failed to parse ansible-doc JSON for %s: %s", module_name, exc)
-        return {"name": module_name, "description": module_name, "parameters": []}
+        raise SchemaFetchError(
+            f"Failed to parse ansible-doc JSON for {module_name}: {exc}"
+        ) from exc
 
     if module_name not in doc:
-        logger.warning("Module %s not found in ansible-doc output", module_name)
-        return {"name": module_name, "description": module_name, "parameters": []}
+        raise SchemaFetchError(f"Module {module_name} not present in ansible-doc output")
 
     return _parse_module_doc(module_name, doc[module_name])
 
@@ -155,7 +159,7 @@ def _describe_suboptions(suboptions: dict[str, Any]) -> str:
             part += f": {info['type']}"
         sub_desc = _flatten_description(info.get("description", ""))
         if sub_desc:
-            part += f" — {sub_desc[:80]}"
+            part += f", {sub_desc[:80]}"
         parts.append(part)
     return "{" + ", ".join(parts) + "}"
 

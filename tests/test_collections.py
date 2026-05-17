@@ -111,7 +111,7 @@ class TestCommunityGeneral:
     @pytest.mark.asyncio
     async def test_ini_file_idempotent(self, server: Any) -> None:
         async with Client(server) as client:
-            # Write once, write again — second call should not change.
+            # Write once, write again, second call should not change.
             await client.call_tool(
                 "community.general.ini_file",
                 {

@@ -5,7 +5,7 @@ import json
 import keyword
 import logging
 import os
-import re as _re
+import re
 import time
 from typing import Annotated, Any, Literal
 
@@ -619,7 +619,7 @@ def _register_tool(
 
 def _sanitize_param_name(name: str, reserved: set[str]) -> str:
     """Convert an Ansible parameter name to a valid Python identifier, avoiding collisions."""
-    safe = _re.sub(r"[^a-zA-Z0-9_]", "_", name)
+    safe = re.sub(r"[^a-zA-Z0-9_]", "_", name)
     if keyword.iskeyword(safe) or keyword.issoftkeyword(safe):
         safe = f"param_{safe}"
     if safe in reserved:

@@ -985,9 +985,7 @@ class TerraformCannon(Cannon):
             # resource addresses (type.name) use destroy_resource.
             if address.startswith("module."):
                 # tofu destroy -target=module.<name> handles dependencies
-                import subprocess as _sp
-
-                proc = _sp.run(
+                proc = subprocess.run(
                     [
                         "tofu",
                         f"-chdir={workspace}",

@@ -196,20 +196,6 @@ def mcp_doctor(
     typer.echo(f"[ ok ] prompts:            {n_prompts}")
 
 
-@app.command(name="serve", hidden=True, deprecated=True)
-def _serve_alias(
-    inventories: Annotated[list[Path] | None, _INV_OPT] = None,
-    modules: Annotated[list[str] | None, _MOD_OPT] = None,
-    profile: Annotated[Path | None, _PROFILE_OPT] = None,
-    transport: Annotated[Transport, typer.Option(help="MCP transport.")] = Transport.stdio,
-    log_level: Annotated[
-        LogLevel, typer.Option("--log-level", help="Logging level.")
-    ] = LogLevel.INFO,
-) -> None:
-    """Deprecated alias for `mcp serve` (kept one release for backward compat)."""
-    _start_server(inventories, modules, profile, transport, log_level)
-
-
 # ---------------------------------------------------------------------------
 # `doctor`, preflight diagnostics
 # ---------------------------------------------------------------------------

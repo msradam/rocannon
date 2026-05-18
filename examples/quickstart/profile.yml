@@ -1,8 +1,10 @@
-# Quickstart profile. Runs against localhost, no SSH, no cloud, no kubernetes.
+# Quickstart profile. Runs against localhost; no SSH, no cloud.
 #
 # Loads:
-#   - Ansible cannon: ping, command, setup against the local machine
-#   - Terraform cannon: null and random providers, all their resources
+#   - ansible.builtin.ping
+#   - ansible.builtin.command
+#   - ansible.builtin.setup
+#   - ansible.builtin.debug
 #
 # Run with:
 #   rocannon mcp doctor --profile examples/quickstart/profile.yml
@@ -16,14 +18,3 @@ modules:
   - ansible.builtin.command
   - ansible.builtin.setup
   - ansible.builtin.debug
-
-terraform:
-  workspace: ./tf-work
-  providers:
-    # Note: the YAML key has to be quoted because unquoted `null` parses to None.
-    "null":
-      source: hashicorp/null
-      version: "~> 3.2"
-    random:
-      source: hashicorp/random
-      version: "~> 3.6"

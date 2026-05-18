@@ -64,7 +64,7 @@ def _build_server(inv: Path, modules: list[str]) -> Any:
     def _fetch(name: str) -> dict[str, Any]:
         return schemas[name]
 
-    with patch("rocannon.cannons.ansible.fetch_module_schema", side_effect=_fetch):
+    with patch("rocannon.ansible.fetch_module_schema", side_effect=_fetch):
         cfg = Config(inventories=[inv], modules=modules)
         return create_server(cfg)
 
@@ -93,7 +93,7 @@ class TestServerToolRegistration:
                 raise SchemaFetchError("synthetic failure")
             return PING_SCHEMA
 
-        with patch("rocannon.cannons.ansible.fetch_module_schema", side_effect=_fetch):
+        with patch("rocannon.ansible.fetch_module_schema", side_effect=_fetch):
             cfg = Config(
                 inventories=[inventory_file],
                 modules=["ansible.builtin.ping", "broken.module.x"],
@@ -109,7 +109,7 @@ class TestServerToolRegistration:
 class TestServerToolInvocation:
     async def test_calls_run_module_with_target_and_args(self, inventory_file: Path) -> None:
         server = _build_server(inventory_file, ["ansible.builtin.ping"])
-        with patch("rocannon.server.run_module", return_value=_ok_result()) as mock_run:
+        with patch("rocannon.ansible.run_module", return_value=_ok_result()) as mock_run:
             async with Client(server) as client:
                 result = await client.call_tool(
                     "ansible.builtin.ping", {"target": "h1", "data": "hello"}
@@ -125,7 +125,7 @@ class TestServerToolInvocation:
 
     async def test_omits_none_args(self, inventory_file: Path) -> None:
         server = _build_server(inventory_file, ["ansible.builtin.ping"])
-        with patch("rocannon.server.run_module", return_value=_ok_result()) as mock_run:
+        with patch("rocannon.ansible.run_module", return_value=_ok_result()) as mock_run:
             async with Client(server) as client:
                 await client.call_tool("ansible.builtin.ping", {"target": "h1"})
         # `data` had no explicit value and defaulted to None, should be excluded
@@ -134,7 +134,7 @@ class TestServerToolInvocation:
     async def test_per_module_timeout_passed_through(self, inventory_file: Path) -> None:
         from rocannon.server import create_server
 
-        with patch("rocannon.cannons.ansible.fetch_module_schema", return_value=PING_SCHEMA):
+        with patch("rocannon.ansible.fetch_module_schema", return_value=PING_SCHEMA):
             cfg = Config(
                 inventories=[inventory_file],
                 modules=["ansible.builtin.ping"],
@@ -142,7 +142,7 @@ class TestServerToolInvocation:
             )
             server = create_server(cfg)
 
-        with patch("rocannon.server.run_module", return_value=_ok_result()) as mock_run:
+        with patch("rocannon.ansible.run_module", return_value=_ok_result()) as mock_run:
             async with Client(server) as client:
                 await client.call_tool("ansible.builtin.ping", {"target": "h1"})
         assert mock_run.call_args[1]["timeout"] == 999
@@ -157,7 +157,7 @@ class TestAuditMiddleware:
         server = _build_server(inventory_file, ["ansible.builtin.ping"])
         caplog.set_level(logging.INFO, logger="rocannon.audit")
 
-        with patch("rocannon.server.run_module", return_value=_ok_result()):
+        with patch("rocannon.ansible.run_module", return_value=_ok_result()):
             async with Client(server) as client:
                 await client.call_tool("ansible.builtin.ping", {"target": "h1"})
 

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Driver for the README demo. Three mcphost invocations against real targets:
-# UBI9 SSH container (Ansible), OpenTofu workspace + Docker daemon (Terraform),
-# kind Kubernetes cluster with bitnami/nginx pre-deployed (Helm).
+# Driver for the README demo. mcphost runs against a UBI9 SSH container,
+# driven by a local LLM via Rocannon.
 
 set -e
 
@@ -25,7 +24,7 @@ cat <<'SPLASH'
 dP       `88888P' `88888P' `88888P8 dP    dP dP    dP `88888P' dP    dP
 
 SPLASH
-printf '%s  Ansible, Terraform, Helm as typed MCP tools.\n' "$RESET"
+printf '%s  Every Ansible module as a typed MCP tool.\n' "$RESET"
 sleep 1.5
 
 ask() {
@@ -40,12 +39,12 @@ ask "ansible: how much memory is free on ubi9?" \
     "$ENV_DIR/mcp-ansible.json" \
     "Use ansible.builtin.command on the ubi9 host to run 'free -h'. Report the total memory and how much is available, in one sentence."
 
-ask "terraform: provision a docker network for the app" \
-    "$ENV_DIR/mcp-terraform.json" \
-    "Use tf_docker_network with instance=app and name=rocannon-app-net to create a bridge network. Then tell me what network ID and IPv4 subnet were assigned."
+ask "ansible: what's the kernel version?" \
+    "$ENV_DIR/mcp-ansible.json" \
+    "Use ansible.builtin.command on the ubi9 host to run 'uname -r'. Report just the kernel version."
 
-ask "helm: what's deployed in the cluster?" \
-    "$ENV_DIR/mcp-helm.json" \
-    "Use helm_list with namespace=rocannon-demo to see what releases are deployed. Report just the release name, chart version, and status in one short line."
+ask "ansible: gather facts and report the OS" \
+    "$ENV_DIR/mcp-ansible.json" \
+    "Use ansible.builtin.setup on the ubi9 host. From the gathered facts, report the distribution name and version in one short line."
 
 sleep 2

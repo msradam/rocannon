@@ -1253,15 +1253,6 @@ wheels = [
 ]
 
 [[package]]
-name = "lark"
-version = "1.3.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/da/34/28fff3ab31ccff1fd4f6c7c7b0ceb2b6968d8ea4950663eadcb5720591a0/lark-1.3.1.tar.gz", hash = "sha256:b426a7a6d6d53189d318f2b6236ab5d6429eaf09259f1ca33eb716eed10d2905", size = 382732, upload-time = "2025-10-27T18:25:56.653Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/82/3d/14ce75ef66813643812f3093ab17e46d3a206942ce7376d31ec2d36229e7/lark-1.3.1-py3-none-any.whl", hash = "sha256:c629b661023a014c37da873b4ff58a817398d12635d3bbb2c5a03be7fe5d1e12", size = 113151, upload-time = "2025-10-27T18:25:54.882Z" },
-]
-
-[[package]]
 name = "librt"
 version = "0.8.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2230,19 +2221,6 @@ wheels = [
 ]
 
 [[package]]
-name = "python-hcl2"
-version = "8.1.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "lark" },
-    { name = "regex" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/39/7b/6c9c973484a482f833a1b88ab69e078e05cc1f761af1839d5cbe7e7fad92/python_hcl2-8.1.2.tar.gz", hash = "sha256:ae809c7e6e39e8c3c3555e7b7f389082207929591fcba062c9f76afb1abe972d", size = 114685, upload-time = "2026-04-10T14:27:44.527Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/5d/c7/10c7832ec3050a191c756f4a591c9033fbfb8e10688e979efb5c4ca4265c/python_hcl2-8.1.2-py3-none-any.whl", hash = "sha256:ac3d16dc6501d4f24db348b3a634afdfb5c10a6715b27cd105a5b77071b84ee3", size = 98951, upload-time = "2026-04-10T14:27:43.529Z" },
-]
-
-[[package]]
 name = "python-multipart"
 version = "0.0.28"
 source = { registry = "https://pypi.org/simple" }
@@ -2476,7 +2454,7 @@ wheels = [
 
 [[package]]
 name = "rocannon"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
@@ -2496,7 +2474,6 @@ all = [
     { name = "litellm" },
     { name = "opentelemetry-exporter-otlp" },
     { name = "opentelemetry-sdk" },
-    { name = "python-hcl2" },
 ]
 ansible = [
     { name = "ansible-core" },
@@ -2505,9 +2482,6 @@ ansible = [
 otel = [
     { name = "opentelemetry-exporter-otlp" },
     { name = "opentelemetry-sdk" },
-]
-terraform = [
-    { name = "python-hcl2" },
 ]
 
 [package.dev-dependencies]
@@ -2522,7 +2496,6 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
-    { name = "python-hcl2" },
     { name = "ruff" },
     { name = "types-pyyaml" },
 ]
@@ -2542,12 +2515,10 @@ requires-dist = [
     { name = "opentelemetry-sdk", marker = "extra == 'otel'", specifier = ">=1.26.0" },
     { name = "prompt-toolkit", specifier = ">=3.0.50" },
     { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "python-hcl2", marker = "extra == 'all'", specifier = ">=8.0" },
-    { name = "python-hcl2", marker = "extra == 'terraform'", specifier = ">=8.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "typer", specifier = ">=0.25.0" },
 ]
-provides-extras = ["ansible", "terraform", "helm", "ai", "otel", "all"]
+provides-extras = ["ansible", "ai", "otel", "all"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2561,7 +2532,6 @@ dev = [
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=1.0" },
     { name = "pytest-cov", specifier = ">=5.0" },
-    { name = "python-hcl2", specifier = ">=8.0" },
     { name = "ruff", specifier = ">=0.15.5" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20250915" },
 ]

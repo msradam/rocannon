@@ -5,34 +5,33 @@
 </p>
 
 <p align="center">
-  <strong>The same Ansible, Terraform, and Helm your team runs by hand. Now callable from any AI agent.</strong>
+  <strong>The same Ansible your team runs by hand. Now callable from any AI agent.</strong>
 </p>
 
 <p align="center">
-  <em>Every module, provider resource, and chart becomes a typed MCP tool. Every AI session saves as a reviewable playbook your team can re-run by hand.</em>
+  <em>Every module — across every collection you've installed — becomes a typed MCP tool. Every AI session saves as a reviewable playbook your team can re-run by hand.</em>
 </p>
 
-Rocannon registers Ansible modules, Terraform resources, Terraform registry
-modules, and Helm charts as typed MCP tools. One server, three catalogs, every
-operation auto-discovered from upstream.
+Rocannon is an MCP server that reads `ansible-doc` at startup and registers
+every installed Ansible module as a typed MCP tool. One server, every module,
+auto-discovered from upstream.
 
 ![demo](docs/assets/demo.gif)
 
 ## What it is
 
-Rocannon is an MCP server. It reads `ansible-doc`, `tofu providers schema`, and
-`helm show chart` at startup and builds typed function definitions for every
-operation in the catalogs you load. An MCP client (Claude Desktop, Cursor,
-mcphost, any custom agent) sees them as ordinary tools with required arguments,
-types, and descriptions.
+Rocannon registers Ansible modules as MCP tools. It reads `ansible-doc -j` for
+each module and builds typed function definitions. An MCP client (Claude
+Desktop, Cursor, mcphost, any custom agent) sees them as ordinary tools with
+required arguments, types, and descriptions.
 
 Why typed tools instead of code generation:
 
 - LLMs cannot invent argument names that the schema rejects.
 - Required arguments are enforced by Pydantic before the call is dispatched.
 - Results come back as structured JSON, not parsed text.
-- The same surface works for Ansible modules, Terraform resources, Terraform
-  registry modules, and Helm charts. No per-operation glue code.
+- Every module from every installed collection works the same way. No
+  per-module glue code.
 
 It also works without an LLM. Rocannon ships a REPL that calls the same MCP
 server in-process. Tab completion, structured output, history.
@@ -40,24 +39,22 @@ server in-process. Tab completion, structured output, history.
 ## Install
 
 ```bash
-# Core install (no cannons enabled, useful for `rocannon doctor`):
+# Core install (useful for `rocannon doctor`):
 pip install rocannon
 
-# Pick the cannons you want:
-pip install 'rocannon[ansible]'         # adds ansible-core + ansible-runner
-pip install 'rocannon[terraform]'       # adds python-hcl2 (needs `tofu` on PATH)
-pip install 'rocannon[helm]'            # needs `helm` on PATH
-pip install 'rocannon[ansible,terraform,helm]'
-pip install 'rocannon[all]'             # everything, plus litellm + otel
+# Add Ansible (pulls in ansible-core + ansible-runner):
+pip install 'rocannon[ansible]'
+
+# Everything (litellm for AI mode + OTel exporters):
+pip install 'rocannon[all]'
 ```
 
-System binaries (`tofu`, `helm`, `ansible-doc`, `ansible-runner`) are detected
-at startup. If one is missing, `rocannon` exits with the install command for
-your platform.
+System binaries (`ansible-doc`, `ansible-runner`) are detected at startup. If
+one is missing, `rocannon` exits with the install command for your platform.
 
 ## Quickstart
 
-Runs against localhost. No SSH, no cloud, no Kubernetes.
+Runs against localhost. No SSH, no cloud.
 
 ```bash
 # 1. From the rocannon checkout:
@@ -76,7 +73,6 @@ Inside the REPL:
 rocannon> .target localhost
 rocannon> ping
 rocannon> command cmd="uptime"
-rocannon> tf_random_string instance=demo length=16 special=false
 rocannon> .history
 rocannon> .save quickstart_session
 rocannon> .exit
@@ -107,12 +103,9 @@ rocannon playbook      list/show/run saved playbooks
 
 Run `rocannon --help` or `rocannon <command> --help` for details.
 
-## Profile examples
+## Profiles
 
-A profile is a YAML file declaring which cannons to load and what they should
-expose. Profiles can mix any combination of the three cannons.
-
-Ansible only:
+A profile is a YAML file declaring which inventory and modules to expose.
 
 ```yaml
 inventories:
@@ -123,52 +116,53 @@ modules:
   - ibm.ibm_zos_core
 ansible_cfg: ./ansible.cfg          # optional
 vault_password_file: ~/.vault_pass  # optional
+extra_envvars:                      # optional: passed through to ansible-runner
+  ZOAU_HOME: /usr/lpp/IBM/zoautil
 ```
 
-Terraform only, multi-provider, plus a registry module:
+A `modules` entry can be:
 
-```yaml
-terraform:
-  workspace: ./tf-work
-  providers:
-    docker:
-      source: kreuzwerker/docker
-      version: "~> 3.0"
-    "null":                          # quote: unquoted `null` parses to None
-      source: hashicorp/null
-      version: "~> 3.2"
-  modules:
-    - source: cloudposse/label/null
-      version: "0.25.0"
+- A specific module: `ansible.builtin.copy`
+- A collection: `ansible.builtin` (registers every module in the collection)
+- A namespace: `community` (every collection in the namespace)
+
+### Multiple profiles + runtime switching
+
+Drop multiple profiles in `.rocannon/profiles/` at your project root (or
+under `~/.rocannon/profiles/` for a user-level default):
+
+```
+my-project/
+└── .rocannon/
+    └── profiles/
+        ├── dev.yml           # local dev inventory
+        ├── box1.yml          # BOX1 sysplex
+        ├── box2.yml          # BOX2 sysplex
+        └── default.yml       # symlink → box1.yml
 ```
 
-Helm only:
+Rocannon walks up from CWD looking for `.rocannon/profiles/`, loads
+everything in there, and uses `default.yml` (symlink, copy, or sole profile)
+as the active profile at boot. Override with `--profile <name>`:
 
-```yaml
-helm:
-  charts:
-    - name: bitnami/nginx
-      version: "21.0.6"
-    - name: bitnami/redis
-      version: "21.0.6"
-  default_namespace: rocannon-demo
+```bash
+rocannon mcp serve                     # uses default.yml
+rocannon mcp serve --profile box2      # boots with box2 active
+rocannon mcp serve --profile ./one.yml # explicit path also works
 ```
 
-All three:
+While the server is running, three MCP tools let an LLM or operator switch
+the active profile mid-session:
 
-```yaml
-inventories: [./hosts]
-modules: [ansible.builtin.ping, ansible.builtin.command]
+- `rocannon_list_profiles` — enumerate available profiles
+- `rocannon_current_profile` — what's active now (inventory, modules, etc.)
+- `rocannon_use_profile(name)` — switch the active profile
 
-terraform:
-  workspace: ./tf-work
-  providers:
-    docker: { source: kreuzwerker/docker, version: "~> 3.0" }
-
-helm:
-  charts:
-    - { name: bitnami/nginx, version: "21.0.6" }
-```
+After switching, subsequent Ansible tool calls use the new profile's
+inventory, `ansible_cfg`, vault, and envvars. The tool surface is the
+**union** of every loaded profile's modules; calling a module that isn't in
+the active profile returns a clean structured error pointing at
+`rocannon_use_profile`.
 
 ## MCP clients
 
@@ -216,8 +210,8 @@ mcphost --config examples/clients/mcphost.json --model ollama:granite4.1:3b \
   -p "list every tool you have"  # mcphost
 ```
 
-Both should report the server connected and list typed tools from each loaded
-cannon.
+Both should report the server connected and list every registered Ansible
+module as a typed tool.
 
 ## REPL (non-AI operator mode)
 
@@ -226,7 +220,7 @@ you want to call modules directly without an LLM in the loop.
 
 ```
 rocannon> .help                    show commands
-rocannon> .target webhosts         set a default target (Ansible only)
+rocannon> .target webhosts         set a default target
 rocannon> .inventory               list hosts and groups
 rocannon> .modules                 list every registered tool
 rocannon> .doc copy                show the schema for ansible.builtin.copy
@@ -240,8 +234,6 @@ Module calls use shell-style key=value syntax with shlex quoting:
 
 ```
 rocannon> ansible.builtin.command target=h1 cmd="systemctl status nginx"
-rocannon> tf_docker_image instance=alpine name=alpine:3.20
-rocannon> helm_install_bitnami_nginx release_name=web namespace=prod values='{"replicaCount": 2}'
 ```
 
 Short names resolve to FQCN, preferring `ansible.builtin`:
@@ -254,28 +246,20 @@ The `.ai` mode is optional and off by default. It uses litellm so the backend
 is up to the operator (Ollama, OpenAI, Anthropic, watsonx, vLLM, etc., picked
 via `ROCANNON_AI_MODEL`).
 
-## Cannons (the plugin model)
+## How it works
 
-A *cannon* is the registration layer for one upstream catalog. Each cannon
-reflects schemas, builds typed function signatures, and registers them on the
-FastMCP server.
-
-| Cannon | Catalog source | Tool name pattern |
-|---|---|---|
-| `AnsibleCannon` | `ansible-doc -j <module>` | `ansible.builtin.copy`, `community.general.docker_container` |
-| `TerraformCannon` | `tofu providers schema -json` + `variables.tf` | `tf_docker_container`, `tf_module_aws_vpc` |
-| `HelmCannon` | `helm show chart` | `helm_install_bitnami_nginx` |
-
-All cannons share one set of cross-cutting services: audit middleware,
+`rocannon.ansible.register_ansible_modules` reads schemas from `ansible-doc`,
+builds typed function signatures, and registers each module on the FastMCP
+server. Cross-cutting services apply to every tool: audit middleware,
 correlation IDs, response size limits, retry on transient errors, history
 buffer for save/replay.
 
-The `Cannon` base class (`rocannon.cannons.Cannon`) is the extension point.
-Adding a fourth cannon means implementing one `register(mcp, services)` method.
+Ansible is the only engine. Rocannon is not a plugin host for other
+infrastructure tools.
 
-## Saved playbooks (cross-cannon)
+## Saved playbooks
 
-Two tools register at the server level regardless of which cannons are loaded:
+Two tools register at the server level:
 
 - `save_playbook(name, description, steps, overwrite)` writes a playbook YAML
   to `$ROCANNON_DATA_DIR/.rocannon/playbooks/<name>.yml`.
@@ -283,10 +267,10 @@ Two tools register at the server level regardless of which cannons are loaded:
   successful tool calls into a playbook.
 
 On the next server start, every saved playbook becomes an MCP prompt named
-`playbook_<name>`. Step format is `{tool, args}`, so a playbook can mix
-Ansible, Terraform, and Helm calls.
+`playbook_<name>`. Step format is `{tool, args}` — the same shape an
+LLM-driven session produces.
 
-If the upstream catalog changes between save and load (provider upgrades,
+If `ansible-doc` shape changes between save and load (collection upgrade,
 module rename), the playbook is skipped with a warning, not registered as a
 half-broken prompt.
 
@@ -295,23 +279,22 @@ half-broken prompt.
 ```bash
 git clone https://github.com/msradam/rocannon.git
 cd rocannon
-uv sync                            # installs all dev + cannon deps
+uv sync                            # installs all dev deps
 ./tests/check.sh                   # ruff format + ruff check + mypy + pytest
 ./tests/check.sh --fix             # same, with auto-fix on format and lint
-uv run pytest -m integration       # opt-in: real docker, kind, tofu, helm
+uv run pytest -m integration       # opt-in: spins up a real UBI9 container
 ```
 
-The integration suite is opt-in because it spins up real containers and talks
-to a local kind cluster. Prereqs (any missing auto-skips the test):
+The integration suite is opt-in because it builds and runs real containers.
+Prereqs (any missing auto-skips the test):
 
 - Docker daemon reachable
-- `tofu` and `helm` on PATH
-- A kind cluster named `rocannon-test`
+- `ansible-doc` on PATH
 
 ## The name
 
 Ursula K. Le Guin coined the word "ansible" in her 1966 novel *Rocannon's
-World*. Rocannon was the title character. Calling the engines "cannons" is a
+World*. Rocannon was the title character. Calling the engine a "cannon" is a
 small pun on the name.
 
 The gryphon at the top is a nod to the Windsteeds that Rocannon and his

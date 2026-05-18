@@ -1,22 +1,16 @@
 import asyncio
 import contextlib
-import inspect
 import json
-import keyword
 import logging
 import os
-import re
 import time
-from typing import Annotated, Any, Literal
+from typing import Any
 
 from fastmcp import FastMCP
-from fastmcp.dependencies import CurrentContext
-from fastmcp.server.context import Context
 from fastmcp.server.middleware import Middleware, MiddlewareContext, PingMiddleware
 from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware, RetryMiddleware
 from fastmcp.server.middleware.logging import StructuredLoggingMiddleware
 from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
-from pydantic import Field
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -29,13 +23,11 @@ except ImportError:
 
 from rocannon.config import Config
 from rocannon.correlation import (
-    get_call_metadata,
     init_call_metadata,
     new_request_id,
     reset_request_id,
     set_request_id,
 )
-from rocannon.executor import run_module
 from rocannon.history import HistoryEntry, RunHistory
 from rocannon.playbook import (
     Playbook,
@@ -45,8 +37,7 @@ from rocannon.playbook import (
     save_playbook,
     validate_against_tools,
 )
-from rocannon.redaction import redact
-from rocannon.schema import ANSIBLE_TYPE_MAP
+from rocannon.profiles import ProfileRegistry, RuntimeContext, single_profile_registry
 
 logger = logging.getLogger("rocannon")
 
@@ -111,8 +102,8 @@ class _AuditMiddleware(Middleware):
 
                 # Default to "successful", a tool that returned without raising
                 # IS a successful invocation from the MCP-protocol perspective.
-                # Tool fns that distinguish business success/failure (Ansible,
-                # TF) set this explicitly via the per-call metadata contextvar.
+                # The Ansible tool fn sets this explicitly via the per-call
+                # metadata contextvar to distinguish module-level failures.
                 status = str(meta.get("status", "successful"))
                 audit_logger.info(
                     json.dumps(
@@ -127,8 +118,7 @@ class _AuditMiddleware(Middleware):
                     )
                 )
                 # If tool_fn didn't override args (e.g. for redaction), use the
-                # raw arguments from the protocol message, works for any
-                # cannon's tool, not just Ansible.
+                # raw arguments from the protocol message.
                 recorded_args: dict[str, Any] = meta.get("args") or tool_params
                 self._history.record(
                     HistoryEntry(
@@ -182,100 +172,163 @@ class _ConcurrencyMiddleware(Middleware):
 audit_logger = logging.getLogger("rocannon.audit")
 
 
-def create_server(config: Config) -> FastMCP:
-    """Build a FastMCP server, run middleware setup, then invoke each cannon."""
-    from rocannon.cannons import Cannon, CannonServices
+def create_server(
+    config_or_registry: Config | ProfileRegistry,
+    active_name: str | None = None,
+) -> FastMCP:
+    """Build a FastMCP server, register every Ansible module, wire profile tools.
 
-    # AnsibleCannon imports ansible_runner at module load, fail loudly with a
-    # helpful install hint if the user picked a profile that needs it without
-    # `pip install rocannon[ansible]`. Terraform/Helm cannons have no Python
-    # deps (they shell out), so always importable.
-    from rocannon.cannons.helm import HelmCannon
-    from rocannon.cannons.terraform import TerraformCannon
-
-    ansible_cls: Any = None
-    ansible_import_error: Exception | None = None
+    Accepts either a single ``Config`` (back-compat, wraps it as a one-entry
+    registry) or a ``ProfileRegistry`` from ``profiles.load_profile_registry``.
+    """
+    # Local import: ``rocannon.ansible`` pulls ansible_runner via the executor.
+    # Fail with a helpful hint if the `ansible` extra isn't installed.
     try:
-        from rocannon.cannons.ansible import AnsibleCannon
-
-        ansible_cls = AnsibleCannon
+        from rocannon.ansible import register_ansible_modules
     except ImportError as exc:
-        ansible_import_error = exc
+        raise RuntimeError(
+            "Rocannon requires the `ansible` extra: "
+            "`pip install 'rocannon[ansible]'` "
+            f"(import failed: {exc})"
+        ) from exc
 
-    mcp = FastMCP(
-        "rocannon",
-        instructions=SERVER_INSTRUCTIONS,
-    )
-    _add_middlewares(mcp, config)
+    if isinstance(config_or_registry, Config):
+        registry = single_profile_registry(config_or_registry)
+    else:
+        registry = config_or_registry
+    runtime = RuntimeContext(registry, active_name=active_name)
+
+    boot_config = runtime.active_config()
+
+    mcp = FastMCP("rocannon", instructions=SERVER_INSTRUCTIONS)
+    _add_middlewares(mcp, boot_config)
 
     history: RunHistory = mcp._rocannon_history  # type: ignore[attr-defined]
-    services = CannonServices(history=history)
 
-    cannons: list[Cannon] = []
-    if config.modules:
-        if ansible_cls is None:
-            raise RuntimeError(
-                "Ansible cannon requires the `ansible` extra: "
-                "`pip install 'rocannon[ansible]'` "
-                f"(import failed: {ansible_import_error})"
-            )
-        cannons.append(ansible_cls(config))
-    if config.terraform is not None:
-        cannons.append(TerraformCannon(config.terraform))
-    if config.helm is not None:
-        cannons.append(HelmCannon(config.helm))
+    report = register_ansible_modules(mcp, runtime, history)
+    logger.info(
+        "Registered %d tool(s), %d resource(s); %d failed",
+        report.tools_registered,
+        report.resources_registered,
+        len(report.tools_failed),
+    )
+    if report.tools_failed:
+        preview = ", ".join(report.tools_failed[:10])
+        extra_count = len(report.tools_failed) - 10
+        suffix = f", ... (+{extra_count} more)" if extra_count > 0 else ""
+        logger.warning("Skipped modules: %s%s", preview, suffix)
 
-    all_metrics = []
-    for cannon in cannons:
-        metrics = cannon.register(mcp, services)
-        all_metrics.append(metrics)
-        logger.info(
-            "Cannon '%s' registered: %d tool(s), %d resource(s), %d prompt(s); %d failed",
-            metrics.cannon,
-            metrics.tools_registered,
-            metrics.resources_registered,
-            metrics.prompts_registered,
-            len(metrics.tools_failed),
-        )
-        if metrics.tools_failed:
-            preview = ", ".join(metrics.tools_failed[:10])
-            extra = len(metrics.tools_failed) - 10
-            suffix = f", … (+{extra} more)" if extra > 0 else ""
-            logger.warning("Cannon '%s' skipped: %s%s", metrics.cannon, preview, suffix)
-
-    total_tools = sum(m.tools_registered for m in all_metrics)
-    if total_tools == 0:
-        raise ValueError(
-            "No tools registered across all cannons. Check the profile, module "
-            "specs, and that the relevant CLI binaries (ansible-doc, tofu, …) "
-            "are installed."
-        )
-
-    # Union of all tools across all cannons. Used by save/replay validation,
-    # commit_session and saved playbook prompts work for any tool name a cannon
-    # registered, not just Ansible modules.
-    all_tool_names: set[str] = set()
-    for m in all_metrics:
-        all_tool_names.update(m.tool_names)
+    all_tool_names: set[str] = set(report.tool_names)
+    _add_runs_resources(mcp, history)
     _add_save_tools(mcp, all_tool_names, history)
-    # Counting save_playbook + commit_session as additional tools.
-    all_tool_names.update({"save_playbook", "commit_session"})
+    _add_profile_tools(mcp, runtime)
+    all_tool_names.update(
+        {
+            "save_playbook",
+            "commit_session",
+            "rocannon_list_profiles",
+            "rocannon_current_profile",
+            "rocannon_use_profile",
+        }
+    )
     prompts_registered = _register_playbook_prompts(mcp, all_tool_names)
     if prompts_registered:
         logger.info("Registered %d saved playbook(s) as prompts", prompts_registered)
 
-    # /health: union of all cannons' notable counters.
     health_payload = {
         "status": "ok",
-        "tools": total_tools,
-        "cannons": {m.cannon: {"tools": m.tools_registered, **m.extra} for m in all_metrics},
+        "tools": report.tools_registered,
+        "hosts": report.hosts,
+        "groups": report.groups,
+        "profiles": registry.names(),
+        "active_profile": runtime.active_name,
     }
 
     @mcp.custom_route("/health", methods=["GET"])
     async def health(_request: Request) -> JSONResponse:
-        return JSONResponse(health_payload)
+        return JSONResponse({**health_payload, "active_profile": runtime.active_name})
 
     return mcp
+
+
+def _add_profile_tools(mcp: FastMCP, runtime: RuntimeContext) -> None:
+    """Register the three profile-management tools.
+
+    These let an MCP client (and the LLM driving it) discover available
+    profiles, see which is active, and switch between them mid-session
+    without restarting the server.
+    """
+
+    @mcp.tool(
+        name="rocannon_list_profiles",
+        description=(
+            "List every profile this server knows about. Profiles are loaded "
+            "from .rocannon/profiles/*.yml. Returns the names, source paths, "
+            "and which one is currently active."
+        ),
+        tags={"rocannon.meta"},
+    )
+    def _list_profiles() -> dict[str, Any]:
+        return {
+            "active": runtime.active_name,
+            "default": runtime.registry.default_name,
+            "source_dir": str(runtime.registry.source_dir) if runtime.registry.source_dir else None,
+            "profiles": [
+                {
+                    "name": p.name,
+                    "path": str(p.path),
+                    "inventories": [str(i) for i in p.config.inventories],
+                    "modules": list(p.config.modules),
+                }
+                for p in runtime.registry.profiles.values()
+            ],
+        }
+
+    @mcp.tool(
+        name="rocannon_current_profile",
+        description=(
+            "Return the active profile's name and resolved configuration "
+            "(inventory paths, module list, ansible_cfg, vault settings)."
+        ),
+        tags={"rocannon.meta"},
+    )
+    def _current_profile() -> dict[str, Any]:
+        active = runtime.active()
+        cfg = active.config
+        return {
+            "name": active.name,
+            "path": str(active.path),
+            "inventories": [str(i) for i in cfg.inventories],
+            "modules": list(cfg.modules),
+            "ansible_cfg": str(cfg.ansible_cfg) if cfg.ansible_cfg else None,
+            "vault_password_file": (
+                str(cfg.vault_password_file) if cfg.vault_password_file else None
+            ),
+            "extra_envvars": dict(cfg.extra_envvars),
+        }
+
+    @mcp.tool(
+        name="rocannon_use_profile",
+        description=(
+            "Switch the active profile. Subsequent Ansible module calls will "
+            "use the new profile's inventory, ansible_cfg, vault, and envvars. "
+            "The new profile must already be known to this server (see "
+            "rocannon_list_profiles); profiles are loaded once at startup."
+        ),
+        tags={"rocannon.meta"},
+    )
+    async def _use_profile(name: str) -> dict[str, Any]:
+        try:
+            active = await runtime.set_active(name)
+        except KeyError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {
+            "ok": True,
+            "active": active.name,
+            "path": str(active.path),
+            "inventories": [str(i) for i in active.config.inventories],
+            "modules": list(active.config.modules),
+        }
 
 
 def _add_middlewares(mcp: FastMCP, config: Config) -> None:
@@ -336,8 +389,8 @@ def _add_middlewares(mcp: FastMCP, config: Config) -> None:
 def _playbook_prompt_body(pb: Playbook) -> str:
     """Render a saved playbook as the prompt text shown to the LLM.
 
-    Generic across cannons, each step is just ``{tool, args}`` so Ansible
-    modules, Terraform resources/modules, and Helm charts all render the same.
+    Each step is just ``{tool, args}`` so any registered Ansible module renders
+    the same way.
     """
     lines = [
         f"You are about to replay the saved Rocannon playbook '{pb.name}'.",
@@ -365,9 +418,9 @@ def _playbook_prompt_body(pb: Playbook) -> str:
 def _register_playbook_prompts(mcp: FastMCP, tool_names: set[str]) -> int:
     """Load .rocannon/playbooks/*.yml and register each as an MCP prompt.
 
-    Validates each playbook against the union of registered tool names across
-    all cannons. A playbook referencing a tool not in this server's surface is
-    skipped with WARN, never registered as a half-broken prompt.
+    Validates each playbook against the registered tool names. A playbook
+    referencing a tool not in this server's surface is skipped with WARN, never
+    registered as a half-broken prompt.
     """
     from fastmcp.prompts.function_prompt import FunctionPrompt
 
@@ -412,16 +465,15 @@ def _add_save_tools(
     tool_names: set[str],
     history: RunHistory,
 ) -> None:
-    """Register the cross-cannon playbook tools: ``save_playbook`` + ``commit_session``."""
+    """Register the playbook recording tools: ``save_playbook`` + ``commit_session``."""
 
     @mcp.tool(
         name="save_playbook",
         description=(
             "Save a named playbook to .rocannon/playbooks/<name>.yml. "
-            "Each step is {tool, args}, works across all cannons (Ansible "
-            "modules, Terraform resources/modules, Helm charts). The playbook "
-            "will be available as an MCP prompt on the next server start. "
-            "Refuses overwrite unless overwrite=True."
+            "Each step is {tool, args}. The playbook will be available as an "
+            "MCP prompt on the next server start. Refuses overwrite unless "
+            "overwrite=True."
         ),
         tags={"rocannon.meta"},
     )
@@ -455,9 +507,9 @@ def _add_save_tools(
         name="commit_session",
         description=(
             "Materialize this session's successful tool calls into a saved "
-            "playbook (any cannon, Ansible, Terraform, Helm). Pass `since` "
-            "(a request_id) to skip everything up to and including that call. "
-            "Only entries with status='successful' are included."
+            "playbook. Pass `since` (a request_id) to skip everything up to "
+            "and including that call. Only entries with status='successful' "
+            "are included."
         ),
         tags={"rocannon.meta"},
     )
@@ -503,34 +555,12 @@ def _add_save_tools(
         }
 
 
-def _add_resources(
-    mcp: FastMCP,
-    inv: dict[str, list[str]],
-    schema_cache: dict[str, dict[str, Any]],
-    history: RunHistory,
-) -> None:
-    """Register read-only MCP resources for inventory, module schemas, and run history."""
+def _add_runs_resources(mcp: FastMCP, history: RunHistory) -> None:
+    """Register the cross-cutting run-history resources.
 
-    @mcp.resource(
-        "rocannon://inventory",
-        name="inventory",
-        description="Hosts and groups loaded from the configured inventory files.",
-        mime_type="application/json",
-    )
-    def _inventory_resource() -> dict[str, list[str]]:
-        return inv
-
-    @mcp.resource(
-        "rocannon://module/{fqcn}",
-        name="module_schema",
-        description="Parsed schema (name, description, parameters) for a registered module.",
-        mime_type="application/json",
-    )
-    def _module_resource(fqcn: str) -> dict[str, Any]:
-        schema = schema_cache.get(fqcn)
-        if schema is None:
-            return {"error": f"module not registered: {fqcn}", "available": sorted(schema_cache)}
-        return schema
+    The Ansible-specific ``rocannon://inventory`` and ``rocannon://module/<fqcn>``
+    resources live in ``rocannon.ansible``.
+    """
 
     @mcp.resource(
         "rocannon://runs",
@@ -552,189 +582,3 @@ def _add_resources(
         if entry is None:
             return {"error": f"no run with request_id={request_id}"}
         return entry.to_dict()
-
-
-def _collection_tag(module_name: str) -> str:
-    """Extract collection name as a tag: 'ansible.builtin.copy' → 'ansible.builtin'."""
-    parts = module_name.rsplit(".", 1)
-    return parts[0] if len(parts) > 1 else module_name
-
-
-def _build_target_annotation(inv: dict[str, list[str]]) -> Any:
-    """Build a typed annotation for the target parameter.
-
-    Uses Literal for small inventories so the model sees exact valid values.
-    Falls back to a described str for larger inventories.
-    """
-    valid_targets = inv["hosts"] + inv["groups"]
-    if len(valid_targets) <= 30:
-        return Annotated[
-            Literal[tuple(valid_targets)],
-            Field(description="Target host or group from inventory"),
-        ]
-    return Annotated[
-        str,
-        Field(description=f"Target host or group. Valid: {', '.join(valid_targets)}"),
-    ]
-
-
-def _ansible_type_to_python(param: dict[str, Any]) -> Any:
-    """Map an Ansible parameter schema to a Python type for MCP schema generation."""
-    atype = param.get("type", "str")
-    choices = param.get("choices")
-
-    if choices:
-        if isinstance(choices, dict):
-            choices = list(choices.keys())
-        if isinstance(choices, list) and all(isinstance(c, str) for c in choices):
-            return Literal[tuple(choices)]
-
-    base = ANSIBLE_TYPE_MAP.get(atype, str)
-
-    if base is list:
-        elem_type = ANSIBLE_TYPE_MAP.get(param.get("elements", "str"), str)
-        return list[elem_type]  # type: ignore[valid-type]
-
-    return base
-
-
-def _register_tool(
-    mcp: FastMCP,
-    module_name: str,
-    schema: dict[str, Any],
-    inv: dict[str, list[str]],
-    inventory_list: list[str],
-    module_timeout: int | None = None,
-    envvars: dict[str, str] | None = None,
-) -> None:
-    """Register a single Ansible module as an MCP tool with typed parameters."""
-    fn = _make_tool_fn(module_name, schema, inv, inventory_list, module_timeout, envvars)
-
-    mcp.tool(
-        name=module_name,
-        description=schema["description"],
-        tags={_collection_tag(module_name)},
-    )(fn)
-
-
-def _sanitize_param_name(name: str, reserved: set[str]) -> str:
-    """Convert an Ansible parameter name to a valid Python identifier, avoiding collisions."""
-    safe = re.sub(r"[^a-zA-Z0-9_]", "_", name)
-    if keyword.iskeyword(safe) or keyword.issoftkeyword(safe):
-        safe = f"param_{safe}"
-    if safe in reserved:
-        safe = f"module_{safe}"
-    return safe
-
-
-def _make_tool_fn(
-    module_name: str,
-    schema: dict[str, Any],
-    inv: dict[str, list[str]],
-    inventory_list: list[str],
-    module_timeout: int | None = None,
-    envvars: dict[str, str] | None = None,
-) -> Any:
-    """Create an async tool function with a dynamic typed signature matching the Ansible module."""
-    target_annotation = _build_target_annotation(inv)
-    params = schema["parameters"]
-
-    annotations: dict[str, Any] = {"target": target_annotation}
-    sig_params: list[inspect.Parameter] = [
-        inspect.Parameter(
-            "target",
-            inspect.Parameter.KEYWORD_ONLY,
-            annotation=target_annotation,
-        ),
-    ]
-
-    reserved = {"target", "ctx"}
-    name_map: dict[str, str] = {}  # python_name → ansible_name
-    seen_names: set[str] = set(reserved)
-
-    for p in params:
-        ansible_name = p["name"]
-        python_name = _sanitize_param_name(ansible_name, reserved)
-        while python_name in seen_names:
-            python_name = f"{python_name}_"
-        seen_names.add(python_name)
-        name_map[python_name] = ansible_name
-
-        py_type = _ansible_type_to_python(p)
-        is_required = p.get("required", False)
-        desc = p.get("description", "")
-        default = p.get("default")
-
-        if is_required:
-            ann = Annotated[py_type, Field(description=desc)]  # type: ignore[valid-type]
-            annotations[python_name] = ann
-            sig_params.append(
-                inspect.Parameter(
-                    python_name,
-                    inspect.Parameter.KEYWORD_ONLY,
-                    annotation=ann,
-                )
-            )
-        else:
-            optional_type = py_type | None if default is None else py_type
-            ann = Annotated[optional_type, Field(description=desc)]  # type: ignore[misc]
-            annotations[python_name] = ann
-            sig_params.append(
-                inspect.Parameter(
-                    python_name,
-                    inspect.Parameter.KEYWORD_ONLY,
-                    annotation=ann,
-                    default=default,
-                )
-            )
-
-    # Context injection, invisible to the model
-    annotations["ctx"] = Context
-    sig_params.append(
-        inspect.Parameter(
-            "ctx",
-            inspect.Parameter.KEYWORD_ONLY,
-            annotation=Context,
-            default=CurrentContext(),
-        )
-    )
-
-    async def tool_fn(**kwargs: Any) -> str:
-        ctx: Context = kwargs.pop("ctx", None)
-        target: str = kwargs.pop("target")
-
-        module_args = {name_map.get(k, k): v for k, v in kwargs.items() if v is not None}
-
-        # Hand args back to the audit middleware via the per-call contextvar so
-        # the history entry includes them (redacted). The result is already
-        # redacted inside the executor.
-        meta = get_call_metadata()
-        if meta is not None:
-            meta["args"] = redact({**module_args, "target": target})
-
-        if ctx and ctx.request_context:
-            await ctx.info(f"Executing {module_name} on {target}")
-        else:
-            logger.info("Executing %s on %s", module_name, target)
-
-        result = await asyncio.to_thread(
-            run_module,
-            module=module_name,
-            module_args=module_args,
-            inventory=inventory_list,
-            host_pattern=target,
-            timeout=module_timeout,
-            envvars=envvars,
-        )
-
-        if meta is not None:
-            meta["result"] = result
-            meta["status"] = result.get("status", "ok")
-
-        return json.dumps(result, indent=2, default=str)
-
-    tool_fn.__annotations__ = annotations
-    tool_fn.__signature__ = inspect.Signature(sig_params)  # type: ignore[attr-defined]
-    tool_fn.__name__ = module_name.replace(".", "_")
-
-    return tool_fn

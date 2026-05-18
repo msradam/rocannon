@@ -1,8 +1,8 @@
 # Demo recording
 
 The GIF embedded in the top-level `README.md` shows mcphost driving a local
-LLM (Granite 4.1:3b via Ollama) to call a typed MCP tool against a real
-Red Hat UBI9 container. Recorded with [asciinema](https://asciinema.org),
+LLM (Granite 4.1:3b via Ollama) to call typed Ansible-module MCP tools against
+a real Red Hat UBI9 container. Recorded with [asciinema](https://asciinema.org),
 converted with [agg](https://github.com/asciinema/agg).
 
 ## One-time setup
@@ -37,18 +37,17 @@ Commit both `demo.cast` (replayable on asciinema.org) and `demo.gif`
 
 ## What the demo shows
 
-Splash, then three mcphost invocations back-to-back, one per cannon. Each
-loads a single-cannon rocannon MCP server and gives Granite one prompt:
+Splash, then three mcphost invocations back-to-back against the same UBI9
+SSH container. Each loads a Rocannon MCP server with a couple of Ansible
+modules and gives Granite one prompt:
 
-1. **Ansible:** ask the UBI9 SSH container what Linux distribution it is
-   (Granite picks `ansible.builtin.command`, runs `cat /etc/os-release`).
-2. **Terraform:** generate a 16-character random string
-   (Granite picks `tf_random_string`, returns the generated value).
-3. **Helm:** list releases in the `rocannon-demo` namespace of the kind
-   cluster (Granite picks `helm_list`, reports what's deployed).
+1. **`ansible.builtin.command` (free -h):** Granite picks the command module,
+   runs `free -h`, summarizes total + available memory.
+2. **`ansible.builtin.command` (uname -r):** Granite reports the kernel version.
+3. **`ansible.builtin.setup`:** Granite runs fact-gathering and pulls the OS
+   distribution + version out of the structured result.
 
-Real targets: UBI9 container, OpenTofu workspace, kind Kubernetes cluster.
-Real tool calls. Real structured output.
+Real target. Real tool calls. Real structured output.
 
 ## Switching models
 

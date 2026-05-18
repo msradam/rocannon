@@ -2,55 +2,23 @@
 
 A plain-English tour of how rocannon actually works. Written for the author's
 own benefit and for future contributors (human or AI) who want the mental
-model behind the code without grepping their way through 4,000 lines.
+model behind the code without grepping their way through the source tree.
 
 ## The 30-second version
 
-Rocannon is a Python program that, at startup, walks three upstream catalogs,
-reads their schemas, and turns every operation in them into a typed Python
-function. It then hands those functions to FastMCP, which exposes them as MCP
-tools over stdio or HTTP.
+Rocannon is a Python program that, at startup, walks the Ansible module
+catalog, reads each module's schema via `ansible-doc -j`, and turns every
+module into a typed Python function. It then hands those functions to FastMCP,
+which exposes them as MCP tools over stdio or HTTP.
 
-The three catalogs are:
-
-| Catalog | What rocannon reads | Tool name shape |
+| Source | What rocannon reads | Tool name shape |
 |---|---|---|
-| Ansible | `ansible-doc -j <module>` | `ansible.builtin.copy`, `community.general.docker_container` |
-| Terraform | `tofu providers schema -json` + `variables.tf` for community modules | `tf_docker_container`, `tf_module_aws_vpc` |
-| Helm | `helm show chart` | `helm_install_bitnami_nginx`, `helm_list` |
+| Ansible | `ansible-doc -j <module>` | `ansible.builtin.copy`, `community.general.docker_container`, `ibm.ibm_zos_core.zos_data_set` |
 
 That's it. No bundled LLM, no opinionated provider matrix, no inventory
-manager, no policy engine. Rocannon's job is the glue between "what upstream
-ships" and "what an MCP client can call."
-
-## The cannons abstraction
-
-A *cannon* is the registration layer for one catalog. Three cannons ship:
-`AnsibleCannon`, `TerraformCannon`, `HelmCannon`, all in
-`src/rocannon/cannons/`.
-
-Every cannon implements one method:
-
-```python
-class Cannon(ABC):
-    def register(self, mcp: FastMCP, services: CannonServices) -> CannonMetrics:
-        ...
-```
-
-The method reflects schemas from the upstream catalog, builds a typed Python
-function per operation, registers each function with FastMCP via
-`mcp.tool(...)`, and returns a `CannonMetrics` record so the doctor knows
-what got loaded.
-
-Adding a fourth cannon (say, Kubernetes-via-kubectl) means subclassing
-`Cannon` and implementing one method. Nothing else in the codebase needs to
-know about the new cannon; `server.create_server()` iterates whatever
-cannons the profile enabled.
-
-Cross-cutting concerns (audit logging, correlation IDs, response size
-limits, transient-error retry, the history buffer feeding save/replay) live
-in `server.py` and reach the cannons through `CannonServices`. A cannon
-should never reimplement these.
+manager, no policy engine, no plugin abstraction for other tools. Rocannon's
+job is the glue between "what ansible-doc ships" and "what an MCP client
+can call."
 
 ## End-to-end: what happens when you call one tool
 
@@ -80,7 +48,7 @@ What actually runs:
          │             5. retry on transient errors
          ▼
 ┌─────────────────┐
-│ Typed tool fn   │  Built at startup by AnsibleCannon
+│ Typed tool fn   │  Built at startup by register_ansible_modules
 │ (closure over   │  from `ansible-doc -j ansible.builtin.command`
 │  module schema) │
 └────────┬────────┘
@@ -107,8 +75,9 @@ The pieces, in order:
    and wraps the handler in a retry policy for transient transport-level
    exceptions.
 4. **The typed tool function** is a closure built at startup. It captures the
-   Ansible module name, the resolved inventory, and the rocannon config. When
-   called, it hands the args to the executor.
+   Ansible module name and the runtime context. When called, it reads the
+   active profile's inventory/envvars/timeouts from the runtime, then hands
+   the args to the executor.
 5. **The executor** (`src/rocannon/executor.py`) uses ansible-runner's
    Python API to invoke `ansible-playbook` as a subprocess. It synthesises
    a one-task playbook from the module name and args, runs it against the
@@ -118,24 +87,18 @@ The pieces, in order:
    latency + status + any redacted error), FastMCP serialises it to MCP's
    tool-result format, and the client gets structured JSON.
 
-The same shape applies to Terraform and Helm calls. The executor changes
-(tofu / helm subprocesses instead of ansible-runner), but the registration
-flow and middleware are identical.
+## Module reflection and registration
 
-## Each cannon, in detail
-
-### AnsibleCannon
-
-`src/rocannon/cannons/ansible.py` (106 lines, the simplest).
+`src/rocannon/ansible.py` is where every Ansible-specific concern lives.
 
 **What it reflects.** Whatever modules the profile asked for, expanded
-through `src/rocannon/schema.py`. A spec can be a fully-qualified collection
+through `src/rocannon/schema.py`. A spec can be a fully-qualified module
 name (`ansible.builtin.copy`), a collection (`ansible.builtin`, expanded to
 every module), or a namespace (`ansible`, expanded across collections).
 
-For each module, the cannon runs `ansible-doc -j <module>` as a subprocess
-and parses the JSON. The parser pulls out parameter names, types, required
-flags, choices, and descriptions.
+For each module, `register_ansible_modules` runs `ansible-doc -j <module>` as
+a subprocess and parses the JSON. The parser pulls out parameter names,
+types, required flags, choices, and descriptions.
 
 **What it exposes.** One tool per module. Tool name is the module's FQCN.
 Tool parameters mirror the module's documented parameters, with one addition:
@@ -146,89 +109,20 @@ a `target` parameter (the inventory host or group pattern).
   collections with hundreds of modules this dominates startup time.
   Loading specific modules instead of whole collections is the fastest path.
 - Some module parameters have names that collide with Python keywords (`if`,
-  `from`) or with reserved cannon slots (`target`). The cannon mangles those
-  on the way in via `_sanitize_param_name` and de-mangles on the way out.
+  `from`) or with reserved slots (`target`). The registration layer mangles
+  those on the way in via `_sanitize_param_name` and de-mangles on the way
+  out.
 
-**Resources.** AnsibleCannon also registers MCP resources for inventory
-introspection (`inventory://hosts`, `inventory://groups`) and per-module
-schema dumps (`module://<fqcn>/schema`).
-
-### TerraformCannon
-
-`src/rocannon/cannons/terraform.py` (1024 lines, by far the largest, because
-Terraform's schema model is the most layered).
-
-**What it reflects.** Two distinct things:
-
-1. **Provider resources.** For each provider declared in the profile (say
-   `kreuzwerker/docker`), the cannon writes a `providers.tf.json` to the
-   workspace, runs `tofu init`, then `tofu providers schema -json`, and
-   parses the resulting JSON. The schema gives every resource type that
-   provider supports, with all attributes and types.
-2. **Community registry modules.** For each module in the profile (say
-   `cloudposse/label/null`), `tofu init` downloads it into
-   `.terraform/modules/<key>/`. The cannon parses the module's
-   `variables.tf` with python-hcl2 to extract input variables, since
-   provider schemas don't cover modules.
-
-**What it exposes.** One tool per resource type (`tf_docker_container`,
-`tf_aws_instance`, ...). One tool per module (`tf_module_null_label`).
-Plus a small handful of meta tools: `tf_apply`, `tf_destroy`,
-`tf_workspace_status`.
-
-**Quirks.**
-- Terraform's type system maps to Python through a custom translator
-  (`_terraform_type_to_python`). Lists and maps come through as nested
-  schemas like `["list", "string"]`; the translator handles arbitrary
-  nesting and synthesises Pydantic-callable annotations.
-- Each resource tool needs an `instance` parameter (the local block name in
-  generated HCL). If a resource type has a literal attribute called
-  `instance`, the cannon mangles it. Same trick as the Ansible cannon's
-  parameter sanitiser.
-- For community modules, pure-computation modules (like cloudposse/label)
-  don't store anything in state because they have no real resources.
-  Rocannon synthesises `output` blocks in the workspace so the module's
-  computed values land in state and become available to subsequent calls.
-- `tofu` returns exit code 2 from `plan` to mean "changes pending,"
-  distinct from 0 (no changes) and 1 (error). The cannon treats 2 as
-  success.
-- Every mutating call wraps itself in a revert-on-failure: if `apply`
-  errors, the resource block (or module block + outputs) is restored to
-  its pre-call state so the workspace stays consistent.
-
-This cannon is large because Terraform's reflection requires multiple
-subprocess invocations, JSON + HCL parsing, two distinct schema sources
-(providers and modules), and careful workspace state management. The other
-two cannons are simpler because their upstream catalogs are flatter.
-
-### HelmCannon
-
-`src/rocannon/cannons/helm.py` (316 lines).
-
-**What it reflects.** For each chart in the profile (say
-`bitnami/nginx@21.0.6`), the cannon runs `helm show chart` and `helm show
-values`. The first gives chart metadata; the second gives the default
-values YAML, which becomes the schema for the install tool.
-
-**What it exposes.** One install tool per chart (`helm_install_bitnami_nginx`),
-plus chart-agnostic meta tools (`helm_list`, `helm_status`, `helm_uninstall`,
-`helm_repo_add`).
-
-**Quirks.**
-- Helm values are nested YAML, not a flat schema. The cannon exposes the
-  full nested structure as a Pydantic-validated `values` parameter rather
-  than synthesising one tool argument per leaf value, which would be
-  unworkable for charts with hundreds of options.
-- `helm_status` returns the full release manifest including all rendered
-  Kubernetes YAML. Smaller models (Granite 3B was the canary) sometimes
-  start generating ingress tutorials when they see this. Demos prefer
-  `helm_list` for that reason; production callers can use either.
+**Resources.** The Ansible layer also registers
+`rocannon://inventory` (active profile's hosts + groups) and
+`rocannon://module/<fqcn>` (parsed schema per module). The cross-cutting
+`rocannon://runs` and `rocannon://runs/{request_id}` resources live in
+`server.py`.
 
 ## The MCP server layer
 
-`src/rocannon/server.py` (740 lines) builds the FastMCP server and wires the
-middleware stack. The middleware order matters: each layer wraps the next,
-inside-out.
+`src/rocannon/server.py` builds the FastMCP server and wires the middleware
+stack. The middleware order matters: each layer wraps the next, inside-out.
 
 ```
 request in:
@@ -237,7 +131,7 @@ request in:
             audit record opened   ──┐
                 response-limit applied ──┐
                     retry policy active   ──┐
-                        cannon handler runs ──┘
+                        tool handler runs   ──┘
                     audit record completed
                 structured log finalised
             correlation ID released
@@ -256,10 +150,10 @@ tracing is off. No runtime cost when disabled.
 
 ## The REPL
 
-`src/rocannon/repl.py` (471 lines) is a prompt-toolkit shell that drives the
-same MCP server in-process. It is not a separate code path; it constructs a
-FastMCP server identically to `mcp serve`, then calls into it without a
-JSON-RPC transport in the middle.
+`src/rocannon/repl.py` is a prompt-toolkit shell that drives the same MCP
+server in-process. It is not a separate code path; it constructs a FastMCP
+server identically to `mcp serve`, then calls into it without a JSON-RPC
+transport in the middle.
 
 This matters for two reasons:
 - Whatever tools the operator can run from the REPL are exactly the same
@@ -273,25 +167,22 @@ to the operator (Ollama, OpenAI, Anthropic, watsonx, vLLM, anything LiteLLM
 supports). The model name is read from `ROCANNON_AI_MODEL`. There is no
 opinionated default.
 
-## Cross-cannon save/replay (playbooks)
+## Save/replay (playbooks)
 
 A *rocannon playbook* (distinct from an Ansible playbook) is a YAML file
-recording a sequence of MCP tool calls. The model is generic:
+recording a sequence of MCP tool calls:
 
 ```yaml
-name: nightly-stack
-description: Bring up the demo stack
+name: restart-stack
+description: Restart the web tier and verify
 steps:
-  - tool: tf_docker_network
-    args: {instance: demo_net, name: demo-net}
-  - tool: helm_install_bitnami_redis
-    args: {release_name: cache, namespace: demo}
   - tool: ansible.builtin.command
     args: {target: webhosts, cmd: systemctl restart nginx}
+  - tool: ansible.builtin.wait_for
+    args: {target: webhosts, host: 127.0.0.1, port: 80}
+  - tool: ansible.builtin.uri
+    args: {target: localhost, url: "http://web.example.com/healthz"}
 ```
-
-Steps can mix any cannons. The runtime doesn't care which cannon registered
-the tool, only that the tool name resolves at replay time.
 
 Two server-level tools handle this:
 
@@ -304,22 +195,47 @@ Two server-level tools handle this:
 On the next server start, every saved playbook is loaded as an MCP prompt
 named `playbook_<name>`, so an MCP client can list and replay them.
 
-If a playbook references a tool that's no longer registered (provider
-upgrade, module rename, cannon disabled), it's skipped with a warning. The
-runtime never registers a half-broken prompt.
+If a playbook references a tool that's no longer registered (collection
+upgrade, module rename), it's skipped with a warning. The runtime never
+registers a half-broken prompt.
 
 ## Configuration loading
 
-A *profile* is a YAML file declaring which cannons to load and what they
-should expose. See `examples/quickstart/profile.yml` for the canonical
-shape; `examples/profiles/` has one per scenario.
+A *profile* is a YAML file declaring which inventory and modules to expose.
+See `examples/quickstart/profile.yml` for the canonical shape;
+`examples/profiles/` has one per scenario.
 
 `src/rocannon/config.py` loads profiles with Pydantic and handles one
 non-obvious thing: **paths in a profile resolve against the profile file's
 parent directory, not the process CWD**. This is what makes `claude mcp add
 ... --profile examples/quickstart/profile.yml` work, where the profile
-references `./hosts` and `./tf-work` even though Claude Code spawns
-rocannon from a CWD that has nothing to do with the profile location.
+references `./hosts` even though Claude Code spawns rocannon from a CWD
+that has nothing to do with the profile location.
+
+### Profile discovery + runtime switching
+
+`src/rocannon/profiles.py` adds discovery and a runtime registry on top of
+single-profile loading.
+
+- `discover_profiles_dir()` walks up from CWD looking for
+  `.rocannon/profiles/`. Falls back to `~/.rocannon/profiles/`.
+- `load_profile_registry(dir)` loads every `*.yml` in that directory, each
+  under its filename stem. `default.yml` (symlink, regular file, or implicit
+  if there's only one profile) sets the default-at-boot.
+- `RuntimeContext` holds the active profile name plus an `asyncio.Lock`.
+  `rocannon_use_profile(name)` mutates it; tool functions read
+  `active_config()` on every call, so a switch takes effect immediately
+  without re-registering tools.
+
+`register_ansible_modules` registers the **union** of every profile's
+modules once. The active profile is consulted at call time, not
+registration. If the active profile doesn't declare the module being
+called, the tool returns a structured error (`status: error`) pointing at
+`rocannon_use_profile`, rather than failing inside ansible-runner.
+
+The typed `target` annotation is built from the **union** of hosts and
+groups across every loaded profile. Ansible itself validates the target
+against the active inventory at execution time.
 
 ## What's deliberately NOT in scope
 
@@ -332,11 +248,12 @@ These show up in design discussions and the answer is "no":
   same as always. Rocannon reads them.
 - **No policy engine.** Authorisation is the MCP client's responsibility.
   IBM Bob's `alwaysAllow` field is one example.
+- **No Terraform / Helm / Kubernetes / Salt integration.** Those tools have
+  different shapes (stateful workspaces, declarative manifests, release-as-
+  unit) and dedicated MCP servers already exist for them. Rocannon stays
+  narrow: every Ansible module, nothing else.
 - **No OpenAPI-to-MCP path.** FastMCP already does this. Rocannon's
-  contribution is the typed-tools-from-Ansible-style-catalogs path.
-- **No state management beyond what upstream provides.** Terraform state
-  lives in the workspace. Helm release tracking lives in Kubernetes. We
-  don't shadow either.
+  contribution is the typed-tools-from-Ansible-catalog path.
 
 ## Code map
 
@@ -345,29 +262,29 @@ src/rocannon/
 ├── cli.py              Typer entrypoint. Subcommands: mcp serve|doctor,
 │                       repl, run, doctor, doc, search, ls, playbook.
 ├── config.py           Pydantic Config model + YAML profile loader.
-├── server.py           create_server(). Iterates cannons, wires middleware,
-│                       registers cross-cannon save_playbook + commit_session.
+├── profiles.py         Profile discovery, registry, RuntimeContext (active
+│                       profile + asyncio.Lock for runtime switching).
+├── ansible.py          register_ansible_modules: ansible-doc reflection,
+│                       typed tool registration, inventory + module resources.
+├── server.py           create_server(). Wires FastMCP middleware, calls
+│                       register_ansible_modules, registers save_playbook +
+│                       commit_session + rocannon_{list,current,use}_profile.
 ├── schema.py           ansible-doc parsing, module spec expansion.
 ├── executor.py         ansible-runner Python-API wrapper.
-├── playbook.py         Cross-cannon playbook model {tool, args}.
+├── playbook.py         Playbook model {tool, args}.
 ├── repl.py             Operator REPL + optional .ai mode (LiteLLM).
 ├── inventory.py        ansible-inventory subprocess wrapper.
 ├── history.py          In-memory ring buffer feeding save/replay.
 ├── correlation.py      Request correlation IDs for the audit log.
-├── redaction.py        Secrets redaction in audit records.
-└── cannons/
-    ├── __init__.py     Cannon ABC, CannonServices, CannonMetrics.
-    ├── ansible.py      AnsibleCannon.
-    ├── terraform.py    TerraformCannon (the big one).
-    └── helm.py         HelmCannon.
+└── redaction.py        Secrets redaction in audit records.
 
 tests/
-├── conftest.py                       Container + Ollama fixtures.
+├── conftest.py                       Shared fixtures.
 ├── containers/Containerfile.ubuntu   The integration-test target.
 ├── test_unit.py                      Fast unit tests, no infra.
 ├── test_collections.py               Ansible collection expansion.
 ├── test_server.py                    FastMCP server construction.
-├── test_cannons_integration.py       Real Ansible + Terraform + Helm.
+├── test_ansible_integration.py       Real UBI9 SSH container.
 │                                     Opt-in via `pytest -m integration`.
 └── check.sh                          The one quality-gate script.
 
@@ -395,11 +312,10 @@ Two tiers, separated by a pytest marker.
 parsing, collection expansion, config loading, playbook serialisation,
 sanitisation rules. Run on every CI commit.
 
-**Integration tests (`pytest -m integration`).** Spin up a real Ansible
-target container, a real OpenTofu workspace, a real kind Kubernetes
-cluster. Verify that every cannon's tool actually executes end-to-end.
-Opt-in because they require docker, tofu, helm, and a kind cluster named
-`rocannon-test`. CI does not run them.
+**Integration tests (`pytest -m integration`).** Spin up a real UBI9 SSH
+container and verify Ansible modules execute end-to-end through the
+registration layer. Opt-in because they require docker. CI does not run
+them.
 
 The combined gate is `./tests/check.sh`: ruff format, ruff lint, mypy
 strict, pytest. The same chain runs in `.github/workflows/ci.yml`.
@@ -410,9 +326,6 @@ Things that surprised the author while building this:
 
 - **ansible-doc is slow.** Loading whole collections at startup adds seconds
   to seconds-per-collection. Production setups should list specific modules.
-- **Terraform's `tofu init` cache is the difference between sub-second and
-  minute-long startup.** Don't blow away `.terraform/` between server
-  restarts unless you have to.
 - **Small models generate tool calls as text.** Granite 3B occasionally
   emits `tool_name(arg=...)` as a string in its response instead of using
   the function-calling protocol. The natural fix is a larger model, but
@@ -423,8 +336,6 @@ Things that surprised the author while building this:
 - **mcphost ignores the `env` field in mcp.json.** Workaround:
   `command: "env"` + `args: ["VAR=value", "rocannon", ...]`. Other clients
   (Claude Code, Cursor, Bob) honour `env` correctly.
-- **The Helm `_status` tool returns rendered Kubernetes YAML.** Useful to a
-  human, distracting to a small model. Use `helm_list` for terse status.
 
 ## Where to start when debugging
 
@@ -436,12 +347,11 @@ In rough order of probability:
 2. **Tool call fails at runtime.** Check the audit log (`rocannon.audit`
    logger). Each call has a correlation ID and a structured error.
 3. **Schema looks wrong.** `rocannon doc <module>` shows what rocannon
-   parsed from upstream. Compare against `ansible-doc <module>`,
-   `tofu providers schema`, or `helm show chart` directly.
+   parsed from upstream. Compare against `ansible-doc <module>` directly.
 4. **MCP client can't see rocannon.** From the project root,
    `claude mcp get rocannon` should report `Status: ✓ Connected`. If not,
    the project-level `.mcp.json` is the first place to look.
-5. **Integration test fails on docker / tofu / helm.** Confirm the binaries
-   are on PATH and the kind cluster named `rocannon-test` exists. The
+5. **Integration test fails on docker.** Confirm docker is running. The
    conftest auto-skips when prereqs are missing; an actual failure means
-   something inside the cannon is wrong, not the test harness.
+   something inside the registration or execution path is wrong, not the
+   test harness.

@@ -23,6 +23,12 @@ from rocannon.executor import (
 )
 from rocannon.inventory import load_inventory
 from rocannon.playbook import load_all_playbooks
+from rocannon.profiles import (
+    ProfileRegistry,
+    discover_profiles_dir,
+    load_profile_registry,
+    single_profile_registry,
+)
 from rocannon.schema import SchemaFetchError, expand_modules, fetch_module_schema
 from rocannon.server import create_server
 
@@ -66,20 +72,100 @@ def _setup_logging(level: LogLevel) -> None:
     root.setLevel(getattr(logging, level.value))
 
 
-def _build_config(
+def _looks_like_path(value: str) -> bool:
+    """Heuristic: treat ``foo/bar``, ``./x.yml``, ``/abs/path.yaml`` as paths.
+
+    A bare token like ``box1`` is treated as a profile name. Anything containing
+    a path separator, ending in ``.yml``/``.yaml``, or already existing as a
+    file on disk is treated as a path.
+    """
+    if "/" in value or "\\" in value:
+        return True
+    if value.endswith((".yml", ".yaml")):
+        return True
+    return Path(value).is_file()
+
+
+def _resolve_profile_source(
     inventories: list[Path],
     modules: list[str],
-    profile: Path | None,
+    profile: str | None,
     transport: str,
-) -> Config:
+) -> tuple[ProfileRegistry, str]:
+    """Resolve CLI flags into a ``(registry, active_name)`` pair.
+
+    Precedence:
+      1. ``--inventory``/``--modules``: build a Config inline; one-entry registry.
+      2. ``--profile <path-or-name>``: path → load that file; name → look up in
+         the discovered ``.rocannon/profiles/`` registry.
+      3. No flags: auto-discover ``.rocannon/profiles/`` and require a default.
+    """
     has_flags = bool(inventories or modules)
     if profile and has_flags:
         raise typer.BadParameter("--profile and --inventory/--modules are mutually exclusive.")
-    if profile:
-        return load_profile(profile, transport=transport)
+
     if has_flags:
-        return Config(inventories=inventories, modules=modules, transport=transport)
-    raise typer.BadParameter("Provide either --profile or at least --inventory and --modules.")
+        cfg = Config(inventories=inventories, modules=modules, transport=transport)
+        return single_profile_registry(cfg), "default"
+
+    if profile:
+        if _looks_like_path(profile):
+            path = Path(profile)
+            if not path.is_file():
+                raise typer.BadParameter(f"profile file not found: {profile}")
+            cfg = load_profile(path, transport=transport)
+            name = path.stem
+            return single_profile_registry(cfg, path=path, name=name), name
+        # Treat as a name: discover and look up.
+        profiles_dir = discover_profiles_dir()
+        if profiles_dir is None:
+            raise typer.BadParameter(
+                f"--profile {profile!r}: no .rocannon/profiles/ found in any "
+                "parent directory and no ~/.rocannon/profiles/ exists. "
+                "Pass a path to a profile YAML, or create the profiles dir."
+            )
+        registry = load_profile_registry(profiles_dir, transport=transport)
+        if profile not in registry.profiles:
+            available = ", ".join(registry.names()) or "(none)"
+            raise typer.BadParameter(
+                f"--profile {profile!r}: not found in {profiles_dir}. Available: {available}"
+            )
+        return registry, profile
+
+    profiles_dir = discover_profiles_dir()
+    if profiles_dir is None:
+        raise typer.BadParameter(
+            "no --profile, no --inventory/--modules, and no .rocannon/profiles/ "
+            "discovered. Provide one of these, or run `rocannon doctor` for help."
+        )
+    registry = load_profile_registry(profiles_dir, transport=transport)
+    if registry.default_name is None:
+        available = ", ".join(registry.names()) or "(none)"
+        raise typer.BadParameter(
+            f"no default profile resolved in {profiles_dir}. Available: {available}. "
+            "Symlink or copy one as default.yml, or pass --profile <name>."
+        )
+    return registry, registry.default_name
+
+
+def _build_config(
+    inventories: list[Path],
+    modules: list[str],
+    profile: str | Path | None,
+    transport: str,
+) -> Config:
+    """Single-profile shortcut for commands that don't switch profiles at runtime.
+
+    Used by `rocannon doctor`, `ls`, `playbook run` — commands that just need
+    one resolved Config and don't need a multi-profile registry.
+    """
+    registry, active = _resolve_profile_source(
+        inventories,
+        modules,
+        str(profile) if profile is not None else None,
+        transport,
+    )
+    return registry.get(active).config
 
 
 def _parse_arg(raw: str) -> tuple[str, str]:
@@ -107,13 +193,15 @@ def _pkg_version(name: str) -> str:
 def _start_server(
     inventories: list[Path] | None,
     modules: list[str] | None,
-    profile: Path | None,
+    profile: str | None,
     transport: Transport,
     log_level: LogLevel,
 ) -> None:
     _setup_logging(log_level)
-    config = _build_config(list(inventories or []), list(modules or []), profile, transport.value)
-    server = create_server(config)
+    registry, active = _resolve_profile_source(
+        list(inventories or []), list(modules or []), profile, transport.value
+    )
+    server = create_server(registry, active_name=active)
     server.run(transport=transport.value)
 
 
@@ -133,10 +221,11 @@ _MOD_OPT = typer.Option(
 _PROFILE_OPT = typer.Option(
     "--profile",
     "-p",
-    help="YAML profile (alternative to --inventory/--modules).",
-    exists=True,
-    dir_okay=False,
-    readable=True,
+    help=(
+        "Profile to load. Either a path to a YAML file, or a name discovered "
+        "in .rocannon/profiles/ (or ~/.rocannon/profiles/). Omit to use the "
+        "default profile from the discovered registry."
+    ),
 )
 
 
@@ -153,7 +242,7 @@ app.add_typer(mcp_app)
 def mcp_serve(
     inventories: Annotated[list[Path] | None, _INV_OPT] = None,
     modules: Annotated[list[str] | None, _MOD_OPT] = None,
-    profile: Annotated[Path | None, _PROFILE_OPT] = None,
+    profile: Annotated[str | None, _PROFILE_OPT] = None,
     transport: Annotated[Transport, typer.Option(help="MCP transport.")] = Transport.stdio,
     log_level: Annotated[
         LogLevel, typer.Option("--log-level", help="Logging level.")
@@ -167,17 +256,21 @@ def mcp_serve(
 def mcp_doctor(
     inventories: Annotated[list[Path] | None, _INV_OPT] = None,
     modules: Annotated[list[str] | None, _MOD_OPT] = None,
-    profile: Annotated[Path | None, _PROFILE_OPT] = None,
+    profile: Annotated[str | None, _PROFILE_OPT] = None,
 ) -> None:
     """Construct the MCP server in-process and survey its tools, resources, prompts."""
     _setup_logging(LogLevel.WARNING)
     try:
-        config = _build_config(list(inventories or []), list(modules or []), profile, "stdio")
-        server = create_server(config)
+        registry, active = _resolve_profile_source(
+            list(inventories or []), list(modules or []), profile, "stdio"
+        )
+        server = create_server(registry, active_name=active)
     except Exception as exc:
         typer.echo(f"[fail] create_server: {exc}", err=True)
         raise typer.Exit(code=1) from exc
-    typer.echo("[ ok ] create_server")
+    typer.echo(
+        f"[ ok ] create_server (active profile: {active}, available: {', '.join(registry.names())})"
+    )
 
     from fastmcp.client import Client
 
@@ -264,7 +357,7 @@ def _ping_check(inv: Path, host: str) -> tuple[_Severity, str]:
 
 @app.command()
 def doctor(
-    profile: Annotated[Path | None, _PROFILE_OPT] = None,
+    profile: Annotated[str | None, _PROFILE_OPT] = None,
     inventories: Annotated[list[Path] | None, _INV_OPT] = None,
     ping: Annotated[
         bool,
@@ -311,7 +404,7 @@ def doctor(
     cfg = None
     if profile:
         try:
-            cfg = load_profile(profile)
+            cfg = _build_config([], [], profile, "stdio")
             inv_paths = cfg.inventories
             rows.append(
                 (
@@ -581,14 +674,14 @@ class LsKind(StrEnum):
 @app.command(name="ls")
 def ls_cmd(
     kind: Annotated[LsKind, typer.Argument(help="What to list.")],
-    profile: Annotated[Path | None, _PROFILE_OPT] = None,
+    profile: Annotated[str | None, _PROFILE_OPT] = None,
     inventories: Annotated[list[Path] | None, _INV_OPT] = None,
 ) -> None:
     """List hosts, groups, or modules from the current profile or inventory files."""
     cfg: Config | None = None
     inv_paths: list[Path] = []
     if profile:
-        cfg = load_profile(profile)
+        cfg = _build_config([], [], profile, "stdio")
         inv_paths = cfg.inventories
     elif inventories:
         inv_paths = list(inventories)
@@ -677,20 +770,6 @@ def playbook_run(
 
     inventory_strs = [str(p) for p in inventories]
     for i, step in enumerate(pb.steps, 1):
-        # CLI-side replay only knows how to run Ansible modules. For TF/Helm
-        # steps, point the user at the MCP path which can dispatch any cannon.
-        if "." not in step.tool or step.tool.split(".")[0] not in (
-            "ansible",
-            *{n.split(".")[0] for n in ("ansible.builtin",)},
-        ):
-            typer.echo(
-                f"error: 'rocannon playbook run' only executes Ansible steps; "
-                f"step {i} uses {step.tool!r}. Run via MCP "
-                f"(`rocannon mcp serve` then call this playbook prompt) "
-                f"to execute non-Ansible cannons.",
-                err=True,
-            )
-            raise typer.Exit(code=2)
         target = step.args.get("target")
         if not target:
             typer.echo(f"error: step {i} missing 'target' in args", err=True)
@@ -726,7 +805,7 @@ def playbook_run(
 def repl(
     inventories: Annotated[list[Path] | None, _INV_OPT] = None,
     modules: Annotated[list[str] | None, _MOD_OPT] = None,
-    profile: Annotated[Path | None, _PROFILE_OPT] = None,
+    profile: Annotated[str | None, _PROFILE_OPT] = None,
     log_level: Annotated[
         LogLevel, typer.Option("--log-level", help="Logging level.")
     ] = LogLevel.WARNING,

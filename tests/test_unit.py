@@ -55,18 +55,18 @@ class TestConfig:
         with pytest.raises(ValueError, match="Inventory file not found"):
             Config(inventories=[Path("/nonexistent/inv.yml")], modules=["ansible.builtin.ping"])
 
-    def test_partial_ansible_modules_only_raises(self, tmp_path: Path) -> None:
+    def test_inventories_without_modules_raises(self, tmp_path: Path) -> None:
         inv = tmp_path / "inv.yml"
         inv.write_text("all:\n  hosts:\n    localhost:\n")
-        with pytest.raises(ValueError, match="Partial Ansible config"):
+        with pytest.raises(ValueError, match="needs both 'inventories' and 'modules'"):
             Config(inventories=[inv], modules=[])
 
-    def test_partial_ansible_inventories_only_raises(self) -> None:
-        with pytest.raises(ValueError, match="Partial Ansible config"):
+    def test_modules_without_inventories_raises(self) -> None:
+        with pytest.raises(ValueError, match="needs both 'inventories' and 'modules'"):
             Config(inventories=[], modules=["ansible.builtin.ping"])
 
-    def test_no_cannon_configured_raises(self) -> None:
-        with pytest.raises(ValueError, match="No cannon configured"):
+    def test_empty_config_raises(self) -> None:
+        with pytest.raises(ValueError, match="needs both 'inventories' and 'modules'"):
             Config()
 
     def test_load_profile(self, tmp_path: Path) -> None:

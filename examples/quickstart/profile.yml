@@ -1,12 +1,12 @@
-# Quickstart profile. Runs against localhost; no SSH, no cloud.
+# Quickstart profile. Targets localhost via ansible_connection=local.
 #
-# Loads:
-#   - ansible.builtin.ping
-#   - ansible.builtin.command
-#   - ansible.builtin.setup
-#   - ansible.builtin.debug
+# Modules:
+#   ansible.builtin.ping
+#   ansible.builtin.command
+#   ansible.builtin.setup
+#   ansible.builtin.debug
 #
-# Run with:
+# Usage:
 #   rocannon mcp doctor --profile examples/quickstart/profile.yml
 #   rocannon repl       --profile examples/quickstart/profile.yml
 

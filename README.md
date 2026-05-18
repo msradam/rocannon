@@ -4,13 +4,14 @@
   <img src="docs/assets/gryphon.svg" alt="" width="120">
 </p>
 
-<p align="center">
-  <strong>Every installed Ansible module as a typed MCP tool.</strong>
-</p>
+Rocannon is an MCP server that registers every installed Ansible module as a
+typed tool. It reads `ansible-doc -j` for each module at startup and builds a
+Pydantic-validated function signature, then exposes the result over the MCP
+protocol (stdio or HTTP). Any MCP client (Claude Code, Cursor, mcphost,
+custom agents) calls the same tools an operator would call from a REPL.
 
-<p align="center">
-  <em>Auto-discovered from <code>ansible-doc</code>. Every AI session saves as a reviewable playbook your team can re-run by hand.</em>
-</p>
+Sessions can be saved as YAML playbooks in `.rocannon/playbooks/` and replayed
+as MCP prompts the next time the server starts.
 
 ![demo](docs/assets/demo.gif)
 
@@ -25,11 +26,11 @@ anything missing.
 
 ## Quickstart
 
-Runs against localhost. No SSH, no cloud.
+The quickstart profile targets `localhost` with `ansible_connection=local`.
 
 ```bash
 cd examples/quickstart
-rocannon mcp doctor --profile profile.yml   # toolchain check
+rocannon mcp doctor --profile profile.yml   # list registered tools
 rocannon repl       --profile profile.yml   # operator shell
 ```
 
@@ -43,7 +44,7 @@ rocannon> .save my_session
 rocannon> .exit
 ```
 
-`.save` writes `.rocannon/playbooks/my_session.yml`. It loads back as an MCP
+`.save` writes `.rocannon/playbooks/my_session.yml`, which loads as an MCP
 prompt the next time the server starts.
 
 ## CLI
@@ -79,7 +80,7 @@ extra_envvars:                      # optional
 `modules` accepts a specific module (`ansible.builtin.copy`), a collection
 (`ansible.builtin`), or a namespace (`community`).
 
-Drop multiple profiles under `.rocannon/profiles/` and they auto-discover:
+Multiple profiles can live under `.rocannon/profiles/`:
 
 ```
 .rocannon/profiles/
@@ -93,11 +94,11 @@ rocannon mcp serve                     # uses default.yml
 rocannon mcp serve --profile box2
 ```
 
-While the server runs, three MCP tools let you switch the active profile
-without restarting: `rocannon_list_profiles`, `rocannon_current_profile`,
-`rocannon_use_profile`. The tool surface is the union of every profile's
-modules; calls to modules outside the active profile return a structured
-error pointing at `rocannon_use_profile`.
+The active profile can be switched at runtime via three MCP tools:
+`rocannon_list_profiles`, `rocannon_current_profile`, `rocannon_use_profile`.
+The tool surface is the union of every profile's modules; a call to a module
+that isn't in the active profile returns a structured error pointing at
+`rocannon_use_profile`.
 
 ## MCP clients
 

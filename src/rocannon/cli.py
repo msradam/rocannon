@@ -760,7 +760,10 @@ def playbook_run(
         LogLevel, typer.Option("--log-level", help="Logging level.")
     ] = LogLevel.WARNING,
 ) -> None:
-    """Execute a saved playbook step-by-step (no LLM, no MCP, direct executor calls)."""
+    """Execute a saved playbook step-by-step against the executor.
+
+    Bypasses the LLM and the MCP transport.
+    """
     _setup_logging(log_level)
     pbs = load_all_playbooks()
     pb = pbs.get(name)

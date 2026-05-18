@@ -43,8 +43,8 @@ ask "ansible: what's the kernel version?" \
     "$ENV_DIR/mcp-ansible.json" \
     "Use ansible.builtin.command on the ubi9 host to run 'uname -r'. Report just the kernel version."
 
-ask "ansible: gather facts and report the OS" \
+ask "ansible: which OS is the container running?" \
     "$ENV_DIR/mcp-ansible.json" \
-    "Use ansible.builtin.setup on the ubi9 host. From the gathered facts, report the distribution name and version in one short line."
+    "Use ansible.builtin.command on the ubi9 host to run 'grep PRETTY_NAME /etc/os-release'. Report just the OS name, nothing else."
 
 sleep 2

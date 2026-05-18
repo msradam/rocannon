@@ -10,8 +10,9 @@ Pydantic-validated function signature, then exposes the result over the MCP
 protocol (stdio or HTTP). Any MCP client (Claude Code, Cursor, mcphost,
 custom agents) calls the same tools an operator would call from a REPL.
 
-Sessions can be saved as YAML playbooks in `.rocannon/playbooks/` and replayed
-as MCP prompts the next time the server starts.
+Sessions can be saved as Ansible playbooks under `.rocannon/playbooks/`. The
+saved file is a real list-of-plays YAML that `ansible-playbook -i <inv> <file>`
+runs directly. Rocannon also loads it back on next startup as an MCP prompt.
 
 ![demo](docs/assets/demo.gif)
 
@@ -44,8 +45,9 @@ rocannon> .save my_session
 rocannon> .exit
 ```
 
-`.save` writes `.rocannon/playbooks/my_session.yml`, which loads as an MCP
-prompt the next time the server starts.
+`.save` writes `.rocannon/playbooks/my_session.yml` as a standard Ansible
+playbook. Run it directly with `ansible-playbook -i hosts my_session.yml`, or
+let Rocannon load it back as an MCP prompt next time the server starts.
 
 ## CLI
 

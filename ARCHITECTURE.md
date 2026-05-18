@@ -169,19 +169,31 @@ opinionated default.
 
 ## Save/replay (playbooks)
 
-A *rocannon playbook* (distinct from an Ansible playbook) is a YAML file
-recording a sequence of MCP tool calls:
+A saved session is written as a **standard Ansible playbook**: a list of
+plays, one per recorded step. The play's `hosts:` is the step's target.
+The file runs directly under `ansible-playbook` with no Rocannon in the
+loop.
 
 ```yaml
-name: restart-stack
-description: Restart the web tier and verify
-steps:
-  - tool: ansible.builtin.command
-    args: {target: webhosts, cmd: systemctl restart nginx}
-  - tool: ansible.builtin.wait_for
-    args: {target: webhosts, host: 127.0.0.1, port: 80}
-  - tool: ansible.builtin.uri
-    args: {target: localhost, url: "http://web.example.com/healthz"}
+# Rocannon session: restart-stack
+# Restart the web tier and verify
+
+- name: ansible.builtin.command on webhosts
+  hosts: webhosts
+  gather_facts: false
+  tasks:
+  - name: ansible.builtin.command
+    ansible.builtin.command:
+      cmd: systemctl restart nginx
+
+- name: ansible.builtin.wait_for on webhosts
+  hosts: webhosts
+  gather_facts: false
+  tasks:
+  - name: ansible.builtin.wait_for
+    ansible.builtin.wait_for:
+      host: 127.0.0.1
+      port: 80
 ```
 
 Two server-level tools handle this:
@@ -192,8 +204,15 @@ Two server-level tools handle this:
   session's successful tool calls (from the history buffer in
   `src/rocannon/history.py`) into a playbook.
 
-On the next server start, every saved playbook is loaded as an MCP prompt
-named `playbook_<name>`, so an MCP client can list and replay them.
+On the next server start, every saved playbook is parsed back through
+`rocannon.playbook` (one Rocannon step per Ansible task) and registered as
+an MCP prompt named `playbook_<name>`. Hand-edited Ansible playbooks load
+the same way: any task whose module is a registered tool replays cleanly,
+task-control keywords like `when:` and `become:` are skipped during
+parsing.
+
+Legacy on-disk shape (`{name, description, steps: [{tool, args}]}` from
+pre-v0.5.1) still loads, so existing playbook files keep working.
 
 If a playbook references a tool that's no longer registered (collection
 upgrade, module rename), it's skipped with a warning. The runtime never
@@ -271,7 +290,7 @@ src/rocannon/
 │                       commit_session + rocannon_{list,current,use}_profile.
 ├── schema.py           ansible-doc parsing, module spec expansion.
 ├── executor.py         ansible-runner Python-API wrapper.
-├── playbook.py         Playbook model {tool, args}.
+├── playbook.py         Saves sessions as Ansible playbooks; parses them back.
 ├── repl.py             Operator REPL + optional .ai mode (LiteLLM).
 ├── inventory.py        ansible-inventory subprocess wrapper.
 ├── history.py          In-memory ring buffer feeding save/replay.

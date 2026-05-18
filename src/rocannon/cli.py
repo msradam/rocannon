@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-import yaml
 
 from rocannon.config import Config, load_profile
 from rocannon.correlation import CorrelationFormatter
@@ -732,13 +731,13 @@ def playbook_list() -> None:
 def playbook_show(
     name: Annotated[str, typer.Argument(help="Saved playbook name.")],
 ) -> None:
-    """Print the saved playbook YAML."""
+    """Print the saved playbook YAML (standard Ansible format)."""
     pbs = load_all_playbooks()
     pb = pbs.get(name)
     if pb is None:
         typer.echo(f"error: no saved playbook named {name!r}", err=True)
         raise typer.Exit(code=2)
-    typer.echo(yaml.safe_dump(pb.to_dict(), sort_keys=False))
+    typer.echo(pb.to_ansible_yaml())
 
 
 @playbook_app.command(name="run")

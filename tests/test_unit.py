@@ -865,3 +865,187 @@ class TestRedaction:
         src = {"password": "p", "ok": "v"}
         redact(src)
         assert src["password"] == "p"
+
+
+# ---------------------------------------------------------------------------
+# Playbook persistence (real Ansible YAML round-trip)
+# ---------------------------------------------------------------------------
+
+
+from rocannon.playbook import (  # noqa: E402
+    Playbook,
+    PlaybookError,
+    PlaybookStep,
+    load_playbook,
+    save_playbook,
+)
+
+
+class TestPlaybookSerialization:
+    def test_saved_file_is_a_list_of_plays(self, tmp_path: Path) -> None:
+        """The on-disk YAML must be a real Ansible playbook (list of plays)."""
+        import yaml
+
+        pb = Playbook(
+            name="demo",
+            description="",
+            steps=[
+                PlaybookStep(tool="ansible.builtin.ping", args={"target": "localhost"}),
+                PlaybookStep(
+                    tool="ansible.builtin.command",
+                    args={"target": "webhosts", "cmd": "uptime"},
+                ),
+            ],
+        )
+        path = save_playbook(pb, root=tmp_path)
+        data = yaml.safe_load(path.read_text())
+        assert isinstance(data, list), "playbook must be a list of plays"
+        assert len(data) == 2
+        # First play
+        assert data[0]["hosts"] == "localhost"
+        assert data[0]["gather_facts"] is False
+        task = data[0]["tasks"][0]
+        assert "ansible.builtin.ping" in task
+        # Second play
+        assert data[1]["hosts"] == "webhosts"
+        assert data[1]["tasks"][0]["ansible.builtin.command"] == {"cmd": "uptime"}
+
+    def test_target_becomes_play_hosts_not_a_task_arg(self, tmp_path: Path) -> None:
+        """target is metadata for the play, not a key under the module."""
+        pb = Playbook(
+            name="t",
+            description="",
+            steps=[PlaybookStep(tool="ansible.builtin.ping", args={"target": "h1", "data": "x"})],
+        )
+        path = save_playbook(pb, root=tmp_path)
+        text = path.read_text()
+        # 'target' should not appear under the module's args dict
+        import yaml
+
+        data = yaml.safe_load(text)
+        module_args = data[0]["tasks"][0]["ansible.builtin.ping"]
+        assert "target" not in module_args
+        assert module_args == {"data": "x"}
+        assert data[0]["hosts"] == "h1"
+
+    def test_round_trip_preserves_step_shape(self, tmp_path: Path) -> None:
+        """Save then load returns equivalent steps."""
+        pb = Playbook(
+            name="rt",
+            description="round trip check",
+            steps=[
+                PlaybookStep(
+                    tool="ansible.builtin.command",
+                    args={"target": "localhost", "cmd": "uptime"},
+                ),
+                PlaybookStep(
+                    tool="ansible.builtin.copy",
+                    args={"target": "h2", "src": "/a", "dest": "/b"},
+                ),
+            ],
+        )
+        path = save_playbook(pb, root=tmp_path)
+        loaded = load_playbook(path)
+        assert loaded.name == pb.name
+        assert loaded.description == pb.description
+        assert len(loaded.steps) == len(pb.steps)
+        for original, parsed in zip(pb.steps, loaded.steps, strict=True):
+            assert parsed.tool == original.tool
+            assert parsed.args == original.args
+
+    def test_description_round_trips_via_header_comment(self, tmp_path: Path) -> None:
+        pb = Playbook(
+            name="d",
+            description="Line one.\nLine two.",
+            steps=[PlaybookStep(tool="ansible.builtin.ping", args={"target": "localhost"})],
+        )
+        path = save_playbook(pb, root=tmp_path)
+        loaded = load_playbook(path)
+        assert loaded.description == "Line one.\nLine two."
+
+    def test_legacy_dict_shape_still_loads(self, tmp_path: Path) -> None:
+        """Pre-v0.5.1 {name, description, steps} files keep working."""
+        legacy = tmp_path / ".rocannon" / "playbooks" / "legacy.yml"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text(
+            "name: legacy\n"
+            "description: from before\n"
+            "steps:\n"
+            "- tool: ansible.builtin.ping\n"
+            "  args:\n"
+            "    target: localhost\n"
+            "- module: ansible.builtin.command\n"
+            "  target: webhosts\n"
+            "  args:\n"
+            "    cmd: uptime\n"
+        )
+        pb = load_playbook(legacy)
+        assert pb.name == "legacy"
+        assert pb.description == "from before"
+        assert len(pb.steps) == 2
+        assert pb.steps[0].tool == "ansible.builtin.ping"
+        assert pb.steps[0].args["target"] == "localhost"
+        assert pb.steps[1].tool == "ansible.builtin.command"
+        assert pb.steps[1].args == {"cmd": "uptime", "target": "webhosts"}
+
+    def test_hand_written_ansible_playbook_loads(self, tmp_path: Path) -> None:
+        """A sysadmin-authored playbook (no Rocannon header) still parses."""
+        pb_file = tmp_path / "pb.yml"
+        pb_file.write_text(
+            "- name: setup\n"
+            "  hosts: all\n"
+            "  gather_facts: false\n"
+            "  tasks:\n"
+            "  - name: install\n"
+            "    ansible.builtin.apt:\n"
+            "      name: nginx\n"
+            "      state: present\n"
+            "    become: true\n"
+        )
+        pb = load_playbook(pb_file)
+        assert pb.name == "pb"
+        assert len(pb.steps) == 1
+        assert pb.steps[0].tool == "ansible.builtin.apt"
+        # become: true is a task-control keyword and is ignored, not treated as a module
+        assert pb.steps[0].args == {"name": "nginx", "state": "present", "target": "all"}
+
+    def test_multi_task_play_yields_one_step_per_task(self, tmp_path: Path) -> None:
+        """A play with N tasks expands to N steps, all sharing the play's hosts."""
+        pb_file = tmp_path / "multi.yml"
+        pb_file.write_text(
+            "- name: webs\n"
+            "  hosts: web\n"
+            "  tasks:\n"
+            "  - name: ping\n"
+            "    ansible.builtin.ping:\n"
+            "  - name: hello\n"
+            "    ansible.builtin.command:\n"
+            "      cmd: echo hi\n"
+        )
+        pb = load_playbook(pb_file)
+        assert len(pb.steps) == 2
+        assert all(s.args["target"] == "web" for s in pb.steps)
+        assert pb.steps[0].tool == "ansible.builtin.ping"
+        assert pb.steps[1].tool == "ansible.builtin.command"
+        assert pb.steps[1].args["cmd"] == "echo hi"
+
+    def test_refuse_overwrite_without_flag(self, tmp_path: Path) -> None:
+        pb = Playbook(
+            name="x",
+            description="",
+            steps=[PlaybookStep(tool="ansible.builtin.ping", args={"target": "h"})],
+        )
+        save_playbook(pb, root=tmp_path)
+        with pytest.raises(PlaybookError, match="already exists"):
+            save_playbook(pb, root=tmp_path)
+        save_playbook(pb, root=tmp_path, overwrite=True)  # ok with flag
+
+    def test_invalid_name_rejected(self, tmp_path: Path) -> None:
+        for bad in ("", "-leading-dash", ".hidden", "has spaces", "slash/in/it"):
+            pb = Playbook(
+                name=bad,
+                description="",
+                steps=[PlaybookStep(tool="ansible.builtin.ping", args={})],
+            )
+            with pytest.raises(PlaybookError, match="invalid playbook name"):
+                save_playbook(pb, root=tmp_path)

@@ -156,7 +156,7 @@ def _build_config(
 ) -> Config:
     """Single-profile shortcut for commands that don't switch profiles at runtime.
 
-    Used by `rocannon doctor`, `ls`, `playbook run` — commands that just need
+    Used by `rocannon doctor`, `ls`, `playbook run`: commands that just need
     one resolved Config and don't need a multi-profile registry.
     """
     registry, active = _resolve_profile_source(

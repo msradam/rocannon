@@ -489,6 +489,24 @@ class TestParseRunnerResult:
         result = _parse_runner_result(runner)
         assert result["changed"] is True
 
+    def test_no_host_results_reports_failure_not_success(self) -> None:
+        """An empty host list (target matched nothing) is a failure from the
+        caller's perspective, even though runner.status='successful'."""
+        runner = _make_runner(
+            events=[],
+            status="successful",
+            stdout_text="Could not match supplied host pattern, ignoring: ghost\n",
+        )
+        result = _parse_runner_result(runner)
+        assert result["status"] == "failed"
+        assert "no host produced a result" in result["stderr"]
+
+    def test_no_host_results_with_failed_runner_keeps_runner_status(self) -> None:
+        """If the runner itself failed before producing events, preserve that."""
+        runner = _make_runner(events=[], status="failed", stderr_text="boom")
+        result = _parse_runner_result(runner)
+        assert result["status"] == "failed"
+
 
 class TestRunModule:
     def test_passes_timeout_to_runner(self, tmp_path: Path) -> None:

@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import ansible_runner  # type: ignore[import-untyped]
+import ansible_runner
 import yaml
 
 from rocannon.redaction import redact, redact_text
@@ -157,12 +157,27 @@ def _parse_runner_result(runner: Any) -> dict[str, Any]:
             }
 
     if not host_results:
+        # No host produced a result. This happens when the target pattern
+        # matched zero hosts ("Could not match supplied host pattern"), the
+        # play was skipped, or the runner crashed before any host ran. Report
+        # this honestly rather than echoing runner.status="successful", which
+        # would mislead callers (LLMs and shell scripts both check status).
+        stdout_text = redact_text(runner.stdout.read() if runner.stdout else "")
+        stderr_text = redact_text(runner.stderr.read() if runner.stderr else "")
+        if runner.status == "successful":
+            status = "failed"
+            stderr_text = (
+                stderr_text
+                + "\nrocannon: no host produced a result; the target may not be in the inventory."
+            ).strip()
+        else:
+            status = runner.status
         return {
-            "status": runner.status,
+            "status": status,
             "changed": False,
             "result": {},
-            "stdout": redact_text(runner.stdout.read() if runner.stdout else ""),
-            "stderr": redact_text(runner.stderr.read() if runner.stderr else ""),
+            "stdout": stdout_text,
+            "stderr": stderr_text,
         }
 
     status = "failed" if any(_host_failed(h) for h in host_results.values()) else runner.status

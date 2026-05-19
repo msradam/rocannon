@@ -837,9 +837,9 @@ def repl(
 # ---------------------------------------------------------------------------
 
 
-# Top-level option names reserved by the FQCN-dispatch CLI. If a module's
-# parameter collides with one of these, the parameter is renamed (e.g. a
-# module param literally called `target` becomes `--module-target`).
+# Option names reserved by the FQCN-dispatch CLI. If a module parameter
+# collides with one of these, the parameter is renamed: a module param
+# literally called ``target`` becomes ``--module-target``.
 _MODULE_CLI_RESERVED: frozenset[str] = frozenset(
     {
         "target",
@@ -860,17 +860,19 @@ def _looks_like_fqcn(value: str) -> bool:
 
 
 def _safe_record_name(stem: str) -> str:
-    """Coerce an arbitrary file stem into a valid Playbook.name."""
-    safe = re.sub(r"[^A-Za-z0-9_-]", "_", stem)
-    safe = safe.lstrip("-_")
+    """Coerce an arbitrary file stem into a valid ``Playbook.name``."""
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", stem).lstrip("-_")
     return safe or "session"
 
 
 def _append_to_record(path: Path, fqcn: str, target: str, module_args: dict[str, Any]) -> None:
-    """Append (or create) a real Ansible playbook with this invocation as a new play."""
-    step_args = dict(module_args)
-    step_args["target"] = target
-    step = PlaybookStep(tool=fqcn, args=step_args)
+    """Append this invocation to ``path`` as a new play in a real Ansible playbook.
+
+    The file is created if it doesn't exist. The on-disk shape is whatever
+    ``Playbook.to_ansible_yaml`` produces, so the resulting file can be run
+    directly with ``ansible-playbook -i <inv> <file>``.
+    """
+    step = PlaybookStep(tool=fqcn, args={**module_args, "target": target})
 
     if path.exists():
         pb = load_playbook(path)
@@ -882,6 +884,38 @@ def _append_to_record(path: Path, fqcn: str, target: str, module_args: dict[str,
     path.write_text(pb.to_ansible_yaml())
 
 
+def _argparse_kwargs_for_type(param: dict[str, Any]) -> dict[str, Any]:
+    """Map an ansible-doc parameter type onto argparse ``add_argument`` kwargs.
+
+    Covers the cases we hit in practice: scalar types (str, int, float, path,
+    raw) pass through as the corresponding Python type; ``bool`` uses
+    ``BooleanOptionalAction`` so ``--wait`` / ``--no-wait`` both work; ``list``
+    takes one or more values via ``nargs="+"``; ``dict`` accepts a JSON string.
+    """
+    atype = param.get("type", "str")
+    if atype == "bool":
+        return {"action": argparse.BooleanOptionalAction}
+    if atype == "int":
+        return {"type": int}
+    if atype == "float":
+        return {"type": float}
+    if atype == "list":
+        elem = param.get("elements", "str")
+        elem_type: type = {"int": int, "float": float}.get(elem, str)
+        return {"nargs": "+", "type": elem_type}
+    if atype == "dict":
+        return {"type": json.loads}
+    # str / path / raw fall through to argparse's default str handling.
+    return {}
+
+
+def _normalize_description(raw: Any) -> str:
+    """ansible-doc returns parameter descriptions as either a string or a list."""
+    if isinstance(raw, list):
+        return " ".join(str(line) for line in raw)
+    return str(raw) if raw else ""
+
+
 def _add_module_param(
     parser: argparse.ArgumentParser,
     param: dict[str, Any],
@@ -889,53 +923,33 @@ def _add_module_param(
 ) -> tuple[str, str]:
     """Add one argparse option from one ansible-doc parameter.
 
-    Returns ``(dest, ansible_name)`` so the caller can map argparse-side names
-    back to module-side names before invoking the executor.
+    Returns ``(dest, ansible_name)`` so the caller can translate argparse-side
+    dests back to module-side names before invoking the executor.
     """
     ansible_name = param["name"]
     dest = ansible_name
     while dest in reserved:
         dest = f"module_{dest}"
-
     flag = f"--{dest.replace('_', '-')}"
-    description = param.get("description", "")
-    if isinstance(description, list):
-        description = " ".join(description)
-    help_text = description or ""
 
-    atype = param.get("type", "str")
+    description = _normalize_description(param.get("description"))
     required = bool(param.get("required", False))
     default = param.get("default")
     choices = param.get("choices")
 
-    kwargs: dict[str, Any] = {
-        "dest": dest,
-        "help": help_text,
-        "required": required,
-    }
+    help_text = description
     if not required and default is not None:
-        kwargs["default"] = default
-        default_note = f"default: {default!r}"
-        kwargs["help"] = f"{help_text} ({default_note})" if help_text else default_note
+        suffix = f"default: {default!r}"
+        help_text = f"{description} ({suffix})" if description else suffix
 
-    if atype == "bool":
-        kwargs["action"] = argparse.BooleanOptionalAction
-        if "required" in kwargs and not required:
-            kwargs.pop("required", None)
-    elif atype == "int":
-        kwargs["type"] = int
-    elif atype == "float":
-        kwargs["type"] = float
-    elif atype == "list":
-        kwargs["nargs"] = "+"
-        elem = param.get("elements", "str")
-        if elem == "int":
-            kwargs["type"] = int
-        elif elem == "float":
-            kwargs["type"] = float
-    elif atype == "dict":
-        kwargs["type"] = json.loads
-    # str / path / raw fall through to default argparse str handling.
+    kwargs: dict[str, Any] = {"dest": dest, "help": help_text}
+    kwargs.update(_argparse_kwargs_for_type(param))
+
+    # argparse rejects `required=` together with `BooleanOptionalAction`.
+    if required and "action" not in kwargs:
+        kwargs["required"] = True
+    elif not required and default is not None:
+        kwargs["default"] = default
 
     if isinstance(choices, list) and choices and all(isinstance(c, str) for c in choices):
         kwargs["choices"] = choices
@@ -944,25 +958,23 @@ def _add_module_param(
     return dest, ansible_name
 
 
-def _dispatch_module(fqcn: str, argv: list[str]) -> None:
-    """Execute an Ansible module as a CLI subcommand.
+def _build_module_parser(
+    fqcn: str, schema: dict[str, Any]
+) -> tuple[argparse.ArgumentParser, dict[str, str]]:
+    """Build the argparse parser for ``rocannon <fqcn> ...``.
 
-    Usage: ``rocannon <fqcn> --target HOST [--module-flag value ...] [--record FILE]``.
-    Schema comes from ``ansible-doc -j``; types are mapped to argparse options.
+    Adds the Rocannon-reserved flags first (``--target``, ``--inventory``,
+    etc.) so they shadow any module-side names that collide. The collision
+    set is passed to ``_add_module_param`` for safe renaming.
+
+    Returns the parser plus a ``{dest: ansible_name}`` map for translating
+    argparse-side dests back to module-side names.
     """
-    try:
-        schema = fetch_module_schema(fqcn)
-    except SchemaFetchError as exc:
-        sys.stderr.write(f"error: {exc}\n")
-        sys.exit(2)
-
-    description = schema.get("description", "")
     parser = argparse.ArgumentParser(
         prog=f"rocannon {fqcn}",
-        description=description,
+        description=schema.get("description", ""),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-
     parser.add_argument("--target", "-t", required=True, help="Host or group from inventory.")
     parser.add_argument(
         "--inventory",
@@ -1002,33 +1014,55 @@ def _dispatch_module(fqcn: str, argv: list[str]) -> None:
         dest, ansible_name = _add_module_param(parser, param, reserved)
         reserved.add(dest)
         name_map[dest] = ansible_name
+    return parser, name_map
 
-    ns = parser.parse_args(argv)
-    _setup_logging(LogLevel(ns.log_level))
 
-    module_args: dict[str, Any] = {}
-    for dest, ansible_name in name_map.items():
-        value = getattr(ns, dest, None)
-        if value is None:
-            continue
-        module_args[ansible_name] = value
+def _resolve_inventory_paths(inventory_flag: list[str], profile_flag: str | None) -> list[str]:
+    """Resolve inventory paths from ``--inventory`` / ``--profile`` / discovery.
 
-    if ns.inventory:
-        inv_paths = [str(Path(p).resolve()) for p in ns.inventory]
-    else:
-        try:
-            cfg = _build_config([], [], ns.profile, "stdio")
-        except typer.BadParameter as exc:
-            sys.stderr.write(f"error: {exc.message}\n")
-            sys.exit(2)
-        inv_paths = [str(p) for p in cfg.inventories]
-
+    Exits cleanly with a helpful message if nothing resolves.
+    """
+    if inventory_flag:
+        return [str(Path(p).resolve()) for p in inventory_flag]
+    try:
+        cfg = _build_config([], [], profile_flag, "stdio")
+    except typer.BadParameter as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        sys.exit(2)
+    inv_paths = [str(p) for p in cfg.inventories]
     if not inv_paths:
         sys.stderr.write(
             "error: no inventory resolved. Pass --inventory <path>, --profile <name>, "
             "or run from a directory with .rocannon/profiles/default.yml.\n"
         )
         sys.exit(2)
+    return inv_paths
+
+
+def _dispatch_module(fqcn: str, argv: list[str]) -> None:
+    """Execute an Ansible module as a CLI subcommand.
+
+    Usage: ``rocannon <fqcn> --target HOST [--module-flag value ...] [--record FILE]``.
+    Module schema comes from ``ansible-doc -j``; types map to argparse options
+    via ``_argparse_kwargs_for_type``.
+    """
+    try:
+        schema = fetch_module_schema(fqcn)
+    except SchemaFetchError as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        sys.exit(2)
+
+    parser, name_map = _build_module_parser(fqcn, schema)
+    ns = parser.parse_args(argv)
+    _setup_logging(LogLevel(ns.log_level))
+
+    module_args: dict[str, Any] = {}
+    for dest, ansible_name in name_map.items():
+        value = getattr(ns, dest, None)
+        if value is not None:
+            module_args[ansible_name] = value
+
+    inv_paths = _resolve_inventory_paths(ns.inventory, ns.profile)
 
     result = run_module(
         module=fqcn,

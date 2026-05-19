@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import json
 import logging
@@ -9,7 +10,7 @@ import sys
 from enum import StrEnum
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -21,7 +22,12 @@ from rocannon.executor import (
     run_module,
 )
 from rocannon.inventory import load_inventory
-from rocannon.playbook import load_all_playbooks
+from rocannon.playbook import (
+    Playbook,
+    PlaybookStep,
+    load_all_playbooks,
+    load_playbook,
+)
 from rocannon.profiles import (
     ProfileRegistry,
     discover_profiles_dir,
@@ -33,7 +39,13 @@ from rocannon.server import create_server
 
 app = typer.Typer(
     name="rocannon",
-    help="Rocannon, Ansible modules as MCP tools.",
+    help=(
+        "Rocannon: every installed Ansible module as a typed MCP tool and CLI.\n\n"
+        "Invoke a module directly with its FQCN:\n"
+        "  rocannon ansible.builtin.command --target h1 --cmd 'uptime'\n"
+        "  rocannon ansible.builtin.copy --target h1 --src /foo --dest /bar\n"
+        "Append --record <file.yml> to write each call into a real Ansible playbook."
+    ),
     no_args_is_help=True,
     add_completion=False,
 )
@@ -41,7 +53,7 @@ app = typer.Typer(
 
 @app.callback()
 def _root() -> None:
-    """Rocannon, Ansible modules as MCP tools."""
+    """Rocannon: every Ansible module as a typed MCP tool and CLI."""
 
 
 class Transport(StrEnum):
@@ -820,8 +832,232 @@ def repl(
     asyncio.run(Repl(config).start())
 
 
+# ---------------------------------------------------------------------------
+# `rocannon <fqcn>`, dispatch a module as a top-level CLI subcommand
+# ---------------------------------------------------------------------------
+
+
+# Top-level option names reserved by the FQCN-dispatch CLI. If a module's
+# parameter collides with one of these, the parameter is renamed (e.g. a
+# module param literally called `target` becomes `--module-target`).
+_MODULE_CLI_RESERVED: frozenset[str] = frozenset(
+    {
+        "target",
+        "inventory",
+        "profile",
+        "record",
+        "pretty",
+        "timeout",
+        "log_level",
+        "help",
+    }
+)
+
+
+def _looks_like_fqcn(value: str) -> bool:
+    """A dotted token that isn't a flag. Used to route argv before Typer."""
+    return bool(value) and not value.startswith("-") and "." in value
+
+
+def _safe_record_name(stem: str) -> str:
+    """Coerce an arbitrary file stem into a valid Playbook.name."""
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", stem)
+    safe = safe.lstrip("-_")
+    return safe or "session"
+
+
+def _append_to_record(path: Path, fqcn: str, target: str, module_args: dict[str, Any]) -> None:
+    """Append (or create) a real Ansible playbook with this invocation as a new play."""
+    step_args = dict(module_args)
+    step_args["target"] = target
+    step = PlaybookStep(tool=fqcn, args=step_args)
+
+    if path.exists():
+        pb = load_playbook(path)
+        pb.steps.append(step)
+    else:
+        pb = Playbook(name=_safe_record_name(path.stem), description="", steps=[step])
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(pb.to_ansible_yaml())
+
+
+def _add_module_param(
+    parser: argparse.ArgumentParser,
+    param: dict[str, Any],
+    reserved: set[str],
+) -> tuple[str, str]:
+    """Add one argparse option from one ansible-doc parameter.
+
+    Returns ``(dest, ansible_name)`` so the caller can map argparse-side names
+    back to module-side names before invoking the executor.
+    """
+    ansible_name = param["name"]
+    dest = ansible_name
+    while dest in reserved:
+        dest = f"module_{dest}"
+
+    flag = f"--{dest.replace('_', '-')}"
+    description = param.get("description", "")
+    if isinstance(description, list):
+        description = " ".join(description)
+    help_text = description or ""
+
+    atype = param.get("type", "str")
+    required = bool(param.get("required", False))
+    default = param.get("default")
+    choices = param.get("choices")
+
+    kwargs: dict[str, Any] = {
+        "dest": dest,
+        "help": help_text,
+        "required": required,
+    }
+    if not required and default is not None:
+        kwargs["default"] = default
+        default_note = f"default: {default!r}"
+        kwargs["help"] = f"{help_text} ({default_note})" if help_text else default_note
+
+    if atype == "bool":
+        kwargs["action"] = argparse.BooleanOptionalAction
+        if "required" in kwargs and not required:
+            kwargs.pop("required", None)
+    elif atype == "int":
+        kwargs["type"] = int
+    elif atype == "float":
+        kwargs["type"] = float
+    elif atype == "list":
+        kwargs["nargs"] = "+"
+        elem = param.get("elements", "str")
+        if elem == "int":
+            kwargs["type"] = int
+        elif elem == "float":
+            kwargs["type"] = float
+    elif atype == "dict":
+        kwargs["type"] = json.loads
+    # str / path / raw fall through to default argparse str handling.
+
+    if isinstance(choices, list) and choices and all(isinstance(c, str) for c in choices):
+        kwargs["choices"] = choices
+
+    parser.add_argument(flag, **kwargs)
+    return dest, ansible_name
+
+
+def _dispatch_module(fqcn: str, argv: list[str]) -> None:
+    """Execute an Ansible module as a CLI subcommand.
+
+    Usage: ``rocannon <fqcn> --target HOST [--module-flag value ...] [--record FILE]``.
+    Schema comes from ``ansible-doc -j``; types are mapped to argparse options.
+    """
+    try:
+        schema = fetch_module_schema(fqcn)
+    except SchemaFetchError as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        sys.exit(2)
+
+    description = schema.get("description", "")
+    parser = argparse.ArgumentParser(
+        prog=f"rocannon {fqcn}",
+        description=description,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    parser.add_argument("--target", "-t", required=True, help="Host or group from inventory.")
+    parser.add_argument(
+        "--inventory",
+        "-i",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="Inventory file (repeatable). Overrides profile discovery.",
+    )
+    parser.add_argument(
+        "--profile",
+        "-p",
+        help="Profile name (from .rocannon/profiles/) or path to a profile YAML.",
+    )
+    parser.add_argument(
+        "--record",
+        metavar="FILE",
+        help="Append this invocation to FILE as a new play in a real Ansible playbook.",
+    )
+    parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        metavar="SECONDS",
+        help="Override default execution timeout.",
+    )
+    parser.add_argument(
+        "--log-level",
+        default="WARNING",
+        choices=[lvl.value for lvl in LogLevel],
+        help="Logging level (default: WARNING).",
+    )
+
+    reserved: set[str] = set(_MODULE_CLI_RESERVED)
+    name_map: dict[str, str] = {}
+    for param in schema.get("parameters", []):
+        dest, ansible_name = _add_module_param(parser, param, reserved)
+        reserved.add(dest)
+        name_map[dest] = ansible_name
+
+    ns = parser.parse_args(argv)
+    _setup_logging(LogLevel(ns.log_level))
+
+    module_args: dict[str, Any] = {}
+    for dest, ansible_name in name_map.items():
+        value = getattr(ns, dest, None)
+        if value is None:
+            continue
+        module_args[ansible_name] = value
+
+    if ns.inventory:
+        inv_paths = [str(Path(p).resolve()) for p in ns.inventory]
+    else:
+        try:
+            cfg = _build_config([], [], ns.profile, "stdio")
+        except typer.BadParameter as exc:
+            sys.stderr.write(f"error: {exc.message}\n")
+            sys.exit(2)
+        inv_paths = [str(p) for p in cfg.inventories]
+
+    if not inv_paths:
+        sys.stderr.write(
+            "error: no inventory resolved. Pass --inventory <path>, --profile <name>, "
+            "or run from a directory with .rocannon/profiles/default.yml.\n"
+        )
+        sys.exit(2)
+
+    result = run_module(
+        module=fqcn,
+        module_args=module_args,
+        inventory=inv_paths,
+        host_pattern=ns.target,
+        timeout=ns.timeout,
+    )
+
+    if ns.record:
+        _append_to_record(Path(ns.record), fqcn, ns.target, module_args)
+
+    sys.stdout.write(json.dumps(result, indent=2 if ns.pretty else None, default=str) + "\n")
+
+    status = result.get("status")
+    if status == "error":
+        sys.exit(2)
+    if status == "failed":
+        sys.exit(1)
+
+
 def main() -> None:
     """CLI entrypoint."""
+    # `rocannon <fqcn> ...` bypasses Typer and dispatches the module directly.
+    # FQCNs always contain a dot and aren't flags, so they're trivially
+    # distinguishable from subcommand names (mcp, doctor, repl, run, ...).
+    if len(sys.argv) > 1 and _looks_like_fqcn(sys.argv[1]):
+        _dispatch_module(sys.argv[1], sys.argv[2:])
+        return
     app()
 
 

@@ -1049,3 +1049,148 @@ class TestPlaybookSerialization:
             )
             with pytest.raises(PlaybookError, match="invalid playbook name"):
                 save_playbook(pb, root=tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# `rocannon <fqcn>` CLI dispatch
+# ---------------------------------------------------------------------------
+
+
+import argparse  # noqa: E402
+
+from rocannon.cli import (  # noqa: E402
+    _add_module_param,
+    _append_to_record,
+    _looks_like_fqcn,
+    _safe_record_name,
+)
+
+
+class TestFqcnRouting:
+    def test_looks_like_fqcn_yes(self) -> None:
+        assert _looks_like_fqcn("ansible.builtin.ping")
+        assert _looks_like_fqcn("community.general.docker_container")
+        assert _looks_like_fqcn("ibm.ibm_zos_core.zos_data_set")
+
+    def test_looks_like_fqcn_no(self) -> None:
+        assert not _looks_like_fqcn("mcp")
+        assert not _looks_like_fqcn("doctor")
+        assert not _looks_like_fqcn("--help")
+        assert not _looks_like_fqcn("-p")
+        assert not _looks_like_fqcn("")
+        assert not _looks_like_fqcn("ping")  # no dot, ambiguous; require FQCN
+
+    def test_safe_record_name_sanitizes(self) -> None:
+        assert _safe_record_name("simple") == "simple"
+        assert _safe_record_name("with-dashes") == "with-dashes"
+        assert _safe_record_name("with.dots.in.it") == "with_dots_in_it"
+        assert _safe_record_name("has spaces") == "has_spaces"
+        assert _safe_record_name("-leading-dash") == "leading-dash"
+        assert _safe_record_name("") == "session"
+
+
+class TestModuleParamArgparseBuilding:
+    """Map ansible-doc parameter schemas into argparse options."""
+
+    def _build(self, params: list[dict]) -> argparse.ArgumentParser:
+        import argparse as ap
+
+        p = ap.ArgumentParser(prog="t")
+        reserved: set[str] = set()
+        for param in params:
+            _add_module_param(p, param, reserved)
+        return p
+
+    def test_required_str_param_becomes_required_flag(self) -> None:
+        parser = self._build([{"name": "src", "type": "str", "required": True}])
+        ns = parser.parse_args(["--src", "/foo"])
+        assert ns.src == "/foo"
+
+    def test_optional_param_with_default_preserved(self) -> None:
+        parser = self._build([{"name": "state", "type": "str", "default": "present"}])
+        ns = parser.parse_args([])
+        assert ns.state == "present"
+
+    def test_int_type_coerced(self) -> None:
+        parser = self._build([{"name": "port", "type": "int", "default": 22}])
+        ns = parser.parse_args(["--port", "8080"])
+        assert ns.port == 8080
+
+    def test_bool_supports_negation(self) -> None:
+        parser = self._build([{"name": "wait", "type": "bool", "default": False}])
+        ns = parser.parse_args(["--wait"])
+        assert ns.wait is True
+        ns2 = parser.parse_args(["--no-wait"])
+        assert ns2.wait is False
+
+    def test_list_param_takes_multiple_values(self) -> None:
+        parser = self._build([{"name": "users", "type": "list", "required": True}])
+        ns = parser.parse_args(["--users", "alice", "bob"])
+        assert ns.users == ["alice", "bob"]
+
+    def test_choices_enforce(self) -> None:
+        parser = self._build([{"name": "state", "type": "str", "choices": ["present", "absent"]}])
+        ns = parser.parse_args(["--state", "absent"])
+        assert ns.state == "absent"
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--state", "bogus"])
+
+    def test_param_colliding_with_reserved_name_gets_mangled(self) -> None:
+        """A module param literally called `target` becomes `--module-target`."""
+        import argparse as ap
+
+        p = ap.ArgumentParser(prog="t")
+        reserved: set[str] = {"target"}
+        dest, ansible_name = _add_module_param(
+            p, {"name": "target", "type": "str", "required": True}, reserved
+        )
+        assert ansible_name == "target"
+        assert dest == "module_target"
+        ns = p.parse_args(["--module-target", "x"])
+        assert ns.module_target == "x"
+
+
+class TestAppendToRecord:
+    def test_creates_new_playbook_file(self, tmp_path: Path) -> None:
+        path = tmp_path / "rb.yml"
+        _append_to_record(
+            path,
+            "ansible.builtin.command",
+            "localhost",
+            {"cmd": "uptime"},
+        )
+        import yaml as yaml_mod
+
+        data = yaml_mod.safe_load(path.read_text())
+        assert isinstance(data, list)
+        assert len(data) == 1
+        assert data[0]["hosts"] == "localhost"
+        assert data[0]["tasks"][0]["ansible.builtin.command"] == {"cmd": "uptime"}
+
+    def test_appends_to_existing_playbook(self, tmp_path: Path) -> None:
+        path = tmp_path / "rb.yml"
+        _append_to_record(path, "ansible.builtin.ping", "h1", {})
+        _append_to_record(path, "ansible.builtin.command", "h2", {"cmd": "ls"})
+        import yaml as yaml_mod
+
+        data = yaml_mod.safe_load(path.read_text())
+        assert len(data) == 2
+        assert data[0]["hosts"] == "h1"
+        assert data[0]["tasks"][0]["ansible.builtin.ping"] == {}
+        assert data[1]["hosts"] == "h2"
+        assert data[1]["tasks"][0]["ansible.builtin.command"] == {"cmd": "ls"}
+
+    def test_recorded_file_is_runnable_by_ansible_playbook(self, tmp_path: Path) -> None:
+        """Sanity: the artifact must be parseable as standard Ansible YAML."""
+        import yaml as yaml_mod
+
+        path = tmp_path / "rb.yml"
+        _append_to_record(path, "ansible.builtin.ping", "localhost", {"data": "pong"})
+        data = yaml_mod.safe_load(path.read_text())
+        play = data[0]
+        # Required shape: top-level list of dicts with hosts + tasks
+        assert set(play.keys()) >= {"name", "hosts", "tasks"}
+        task = play["tasks"][0]
+        # Module key is the FQCN; args are a dict under it
+        assert "ansible.builtin.ping" in task
+        assert task["ansible.builtin.ping"] == {"data": "pong"}

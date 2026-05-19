@@ -10,9 +10,20 @@ Pydantic-validated function signature, then exposes the result over the MCP
 protocol (stdio or HTTP). Any MCP client (Claude Code, Cursor, mcphost,
 custom agents) calls the same tools an operator would call from a REPL.
 
-Sessions can be saved as Ansible playbooks under `.rocannon/playbooks/`. The
-saved file is a real list-of-plays YAML that `ansible-playbook -i <inv> <file>`
-runs directly. Rocannon also loads it back on next startup as an MCP prompt.
+Every module is also a top-level CLI subcommand:
+
+```
+rocannon ansible.builtin.command --target h1 --cmd 'uptime'
+rocannon ansible.builtin.copy    --target h1 --src /etc/hosts --dest /tmp/h
+```
+
+Append `--record path/to/runbook.yml` to any invocation and Rocannon writes
+each call as a new play in a real Ansible playbook. The resulting file runs
+directly under `ansible-playbook -i <inv> path/to/runbook.yml`.
+
+Sessions driven via the MCP server save the same way: as Ansible playbooks
+under `.rocannon/playbooks/`. Rocannon also loads them back on next startup
+as MCP prompts.
 
 ![demo](docs/assets/demo.gif)
 
@@ -52,16 +63,21 @@ let Rocannon load it back as an MCP prompt next time the server starts.
 ## CLI
 
 ```
+rocannon <fqcn>        invoke a module: rocannon ansible.builtin.copy ...
+                       optional --record FILE appends each call to a playbook
 rocannon mcp serve     start the MCP server (stdio or http)
 rocannon mcp doctor    list registered tools, resources, prompts
 rocannon repl          interactive shell on the same MCP server
-rocannon run           call one module ad-hoc
+rocannon run           legacy ad-hoc form (module FQCN + -a key=value)
 rocannon doctor        system health (binaries, env, inventory)
 rocannon doc <module>  print parsed schema for a module
 rocannon search <q>    find modules by name or description
 rocannon ls            list hosts/groups/modules from a profile
 rocannon playbook      list/show/run saved playbooks
 ```
+
+Per-module help (typed flags, defaults, descriptions from `ansible-doc`):
+`rocannon ansible.builtin.copy --help`.
 
 ## Profiles
 

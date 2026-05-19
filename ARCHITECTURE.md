@@ -280,6 +280,10 @@ These show up in design discussions and the answer is "no":
 src/rocannon/
 ├── cli.py              Typer entrypoint. Subcommands: mcp serve|doctor,
 │                       repl, run, doctor, doc, search, ls, playbook.
+│                       Also: `rocannon <fqcn>` bypasses Typer and dispatches
+│                       the named Ansible module as a CLI subcommand with
+│                       typed flags built from `ansible-doc -j`. --record FILE
+│                       appends each call to a real Ansible playbook.
 ├── config.py           Pydantic Config model + YAML profile loader.
 ├── profiles.py         Profile discovery, registry, RuntimeContext (active
 │                       profile + asyncio.Lock for runtime switching).

@@ -1,11 +1,10 @@
-"""Interactive REPL for Rocannon.
+"""Interactive REPL.
 
-Same MCP server as ``rocannon mcp serve``, constructed in-process. Every
-module invocation and dot-command flows through ``fastmcp.Client`` over the
-in-memory transport, so the audit middleware, redaction, history, and
-ResponseLimitingMiddleware all apply. ``.save`` calls work because every
-tool invocation lands in the same ``RunHistory`` the ``commit_session``
-tool reads.
+Runs ``create_server`` in-process and drives it through ``fastmcp.Client``
+over the in-memory transport, so the middleware stack (audit, redaction,
+history, response limiting) applies to REPL calls the same way it applies
+to MCP-client calls. ``.save`` reads the same ``RunHistory`` that
+``commit_session`` does.
 """
 
 from __future__ import annotations

@@ -207,8 +207,8 @@ Two server-level tools handle this:
 On the next server start, every saved playbook is parsed back through
 `rocannon.playbook` (one Rocannon step per Ansible task) and registered as
 an MCP prompt named `playbook_<name>`. Hand-edited Ansible playbooks load
-the same way: any task whose module is a registered tool replays cleanly,
-task-control keywords like `when:` and `become:` are skipped during
+the same way: any task whose module is a registered tool produces a step,
+and task-control keywords like `when:` and `become:` are skipped during
 parsing.
 
 Legacy on-disk shape (`{name, description, steps: [{tool, args}]}` from

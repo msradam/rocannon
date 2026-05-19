@@ -1,9 +1,10 @@
-"""Redact secrets from Ansible result payloads before they are logged or returned.
+"""Redact secrets from Ansible result payloads before logging or return.
 
-Ansible inventories and module args routinely contain ``ansible_password``,
-``ansible_become_password``, API tokens, and private keys. These leak into
-``stdout``/``stderr`` and the ``invocation.module_args`` echo that ansible-runner
-puts in every result. Scrub before the data leaves the executor.
+Ansible inventories and module args contain ``ansible_password``,
+``ansible_become_password``, API tokens, and private keys. ansible-runner
+echoes the full ``invocation.module_args`` into every result, and these
+values also appear in ``stdout``/``stderr``. ``redact`` and ``redact_text``
+scrub both forms before the data leaves the executor.
 """
 
 import re

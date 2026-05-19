@@ -1,17 +1,15 @@
 """Profile discovery, registry, and runtime context.
 
 A profile is a YAML file declaring inventory + modules + ansible config.
-`.rocannon/profiles/<name>.yml` files in the current project (or
-`~/.rocannon/profiles/`) are auto-discovered and loaded together so the
-running MCP server can switch between them at runtime.
+`.rocannon/profiles/<name>.yml` files (or `~/.rocannon/profiles/`) are
+discovered at startup.
 
-The default profile is whichever one `default.yml` resolves to (when it's
-a symlink), or `default.yml` itself if it's a regular file. If neither is
-present and exactly one profile exists, that profile is the default.
+Default-profile resolution: `default.yml` symlink target, then `default.yml`
+as a regular file, then the sole profile if there is exactly one.
 
-The `RuntimeContext` holds which profile is currently active. Cannon tool
-functions read its `active_config()` on every call, so a profile switch
-takes effect immediately without re-registering tools.
+`RuntimeContext` holds the active profile name behind an asyncio.Lock.
+Tool functions read `active_config()` on every call, so switching the
+active profile takes effect without re-registering tools.
 """
 
 from __future__ import annotations
@@ -147,9 +145,9 @@ class RuntimeContext:
         self.registry = registry
         self._active_name = active_name
         self._lock = asyncio.Lock()
-        # Per-profile FQCN module sets, populated by AnsibleCannon at register
-        # time after `expand_modules`. Used to fail tool calls cleanly when the
-        # active profile doesn't declare the module being called.
+        # Per-profile FQCN module sets. Populated by `register_ansible_modules`
+        # after `expand_modules`, read by each tool call to check whether the
+        # active profile declares the module being invoked.
         self.expanded_modules: dict[str, set[str]] = {}
 
     @property

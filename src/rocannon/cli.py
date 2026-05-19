@@ -165,10 +165,10 @@ def _build_config(
     profile: str | Path | None,
     transport: str,
 ) -> Config:
-    """Single-profile shortcut for commands that don't switch profiles at runtime.
+    """Single-profile shortcut for commands that don't need a registry.
 
-    Used by `rocannon doctor`, `ls`, `playbook run`: commands that just need
-    one resolved Config and don't need a multi-profile registry.
+    Used by ``rocannon doctor``, ``ls``, ``playbook run``. Returns the
+    resolved ``Config`` for the active profile.
     """
     registry, active = _resolve_profile_source(
         inventories,
@@ -1020,7 +1020,7 @@ def _build_module_parser(
 def _resolve_inventory_paths(inventory_flag: list[str], profile_flag: str | None) -> list[str]:
     """Resolve inventory paths from ``--inventory`` / ``--profile`` / discovery.
 
-    Exits cleanly with a helpful message if nothing resolves.
+    Exits with status 2 and an error message on stderr when nothing resolves.
     """
     if inventory_flag:
         return [str(Path(p).resolve()) for p in inventory_flag]

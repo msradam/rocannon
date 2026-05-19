@@ -1,17 +1,16 @@
 """Saved playbooks: standard Ansible YAML under ``.rocannon/playbooks/``.
 
-A saved playbook is a real Ansible playbook (a list of plays) that
-``ansible-playbook -i <inventory> <file>`` can run directly. One play per
-recorded step, each play with a single task; the step's ``target`` becomes
-the play's ``hosts:``.
+On-disk shape is a list of plays, one per recorded step; the step's
+``target`` becomes the play's ``hosts:``. ``ansible-playbook -i <inv>
+<file>`` runs the file directly with no Rocannon in the loop.
 
-The internal in-memory model stays flat (``Playbook.steps`` is a list of
-``PlaybookStep(tool, args)``) for replay through the MCP server. The
-on-disk shape is Ansible's; the internal shape is Rocannon's; conversion
-happens at the file boundary.
+In-memory shape is ``Playbook.steps`` (a flat list of
+``PlaybookStep(tool, args)``) for replay through the MCP server.
+Conversion between the two happens only at the file boundary
+(``to_ansible_yaml`` / ``from_ansible_plays``).
 
-Legacy on-disk shape (``{name, description, steps: [{tool, args}]}``) is
-still loaded for backward compatibility.
+Legacy on-disk shape (``{name, description, steps: [{tool, args}]}``)
+still loads.
 """
 
 from __future__ import annotations

@@ -1,9 +1,10 @@
 """Ansible module reflection and MCP tool registration.
 
-Reads schemas via ``ansible-doc -j`` and registers one typed FastMCP tool per
-module. Inventory and per-module-schema resources live here too because they
-are Ansible-specific; cross-cutting tools (save_playbook, commit_session,
-rocannon_*_profile) live in ``server.py``.
+``register_ansible_modules`` reads schemas via ``ansible-doc -j`` and
+registers one typed FastMCP tool per module. The Ansible-specific resources
+(``rocannon://inventory``, ``rocannon://module/<fqcn>``) live here too;
+the cross-cutting tools (``save_playbook``, ``commit_session``,
+``rocannon_*_profile``) live in ``server.py``.
 """
 
 from __future__ import annotations

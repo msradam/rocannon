@@ -1,16 +1,17 @@
-"""Drive Rocannon's MCP tools from natural language with Claude Haiku.
+"""Drive the Rocannon Execution Environment from natural language with Haiku.
 
-Uses the Claude Agent SDK against the logged-in Claude Code session (no API
-key). Haiku is given plain-English tasks and a Rocannon MCP server; it picks
-the right Ansible module, calls it against the real host, and answers.
+The MCP server here IS the EE container: the Agent SDK launches
+`docker run -i rocannon-ee:demo rocannon mcp serve ...`, so Haiku is talking to
+the Rocannon baked into the frozen image, executing against the EE's own host.
 
-Usage:
-    uv run python examples/case-study/agent_demo.py [profile.yml]
+Build the image first:
+    ansible-builder build -t rocannon-ee:demo -f execution-environment.yml
+Then:
+    uv run python examples/execution-environment/agent_demo.py
 """
 
 import asyncio
 import json
-import sys
 from pathlib import Path
 
 from claude_agent_sdk import (
@@ -22,13 +23,11 @@ from claude_agent_sdk import (
     ToolUseBlock,
 )
 
-ROOT = Path(__file__).resolve().parents[2]
-PROFILE = sys.argv[1] if len(sys.argv) > 1 else "/tmp/rocannon-demo-env/profile-agent.yml"
+EE_DIR = Path(__file__).resolve().parent
 
 PROMPTS = [
-    "What OS and version is host ubi9 running?",
-    "Run 'uptime' on host ubi9 and report the load averages.",
-    "Set the message of the day on host ubi9 to exactly 'Managed by Rocannon', and tell me whether it changed anything.",
+    "Run 'uname -a' on the local host and report the kernel version.",
+    "Gather the host facts and tell me the OS distribution and Python version.",
 ]
 
 
@@ -43,11 +42,9 @@ def _render(message: object) -> None:
         if isinstance(block, TextBlock) and block.text.strip():
             print(f"  haiku: {block.text.strip()}")
         elif isinstance(block, ToolUseBlock):
-            print(f"  -> calls {block.name}")
-            print(f"     args: {json.dumps(block.input)}")
+            print(f"  -> calls {block.name}  {json.dumps(block.input)}")
         elif isinstance(block, ToolResultBlock):
-            text = _result_text(block.content).replace("\n", " ")
-            print(f"     result: {text[:240]}")
+            print(f"     result: {_result_text(block.content).replace(chr(10), ' ')[:200]}")
 
 
 async def main() -> None:
@@ -55,8 +52,6 @@ async def main() -> None:
         model="claude-haiku-4-5-20251001",
         permission_mode="acceptEdits",
         allowed_tools=["mcp__rocannon__*"],
-        # Strip the built-in Claude Code tools so Haiku sees only Rocannon's
-        # Ansible tools (no sub-agents, no tool-search deferral, no shell).
         disallowed_tools=[
             "Task", "Bash", "BashOutput", "KillShell", "Read", "Edit", "Write",
             "NotebookEdit", "Glob", "Grep", "WebSearch", "WebFetch", "TodoWrite",
@@ -66,14 +61,20 @@ async def main() -> None:
         mcp_servers={
             "rocannon": {
                 "type": "stdio",
-                "command": "uv",
-                "args": ["run", "--directory", str(ROOT), "rocannon", "mcp", "serve", "--profile", PROFILE],
+                "command": "docker",
+                "args": [
+                    "run", "-i", "--rm",
+                    "-v", f"{EE_DIR}:/cfg",
+                    "rocannon-ee:demo",
+                    "rocannon", "mcp", "serve", "--profile", "/cfg/profile-agent.yml",
+                ],
             }
         },
     )
     async with ClaudeSDKClient(options=options) as client:
-        # The first query spawns and connects the MCP server, which lags; drain
-        # a throwaway turn so the real prompts see the tools.
+        # The first query spawns and connects the MCP server (a `docker run`
+        # here), which lags; drain a throwaway turn so the real prompts see the
+        # tools.
         await client.query("Which host can you manage?")
         async for _ in client.receive_response():
             pass

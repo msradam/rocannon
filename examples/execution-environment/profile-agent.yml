@@ -1,0 +1,8 @@
+inventories:
+  - /cfg/inventory.ini
+modules:
+  - ansible.builtin.command
+  - ansible.builtin.setup
+  - ansible.builtin.copy
+  - ansible.builtin.file
+  - ansible.posix.authorized_key

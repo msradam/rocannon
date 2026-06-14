@@ -1,0 +1,5 @@
+inventories:
+  - /cfg/inventory.ini
+modules:
+  - ansible.builtin
+  - ansible.posix

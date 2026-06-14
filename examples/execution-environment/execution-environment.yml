@@ -1,0 +1,40 @@
+version: 3
+
+# A frozen Ansible Execution Environment with Rocannon baked in. The bundled
+# collection set is fixed, so `rocannon mcp doctor` against it produces a
+# deterministic tool surface on any machine that can run the image.
+#
+# Build:  ansible-builder build -t rocannon-ee:demo -f execution-environment.yml
+#
+# Base note: Rocannon needs Python >= 3.12. This builds on a python:3.12 base
+# and installs ansible-core + ansible-runner explicitly. The official python
+# image keeps python at /usr/local/bin, so the prepend_base step symlinks it to
+# /usr/bin/python3 (where ansible-builder expects it). Swap base_image for your
+# org's EE (e.g. an AAP ee-minimal image, Python 3.12+) and drop that step.
+
+images:
+  base_image:
+    name: docker.io/library/python:3.12-slim
+
+options:
+  package_manager_path: /usr/bin/apt-get
+
+additional_build_steps:
+  prepend_base:
+    - RUN ln -sf /usr/local/bin/python3 /usr/bin/python3
+    - RUN /usr/bin/python3 -m pip install --no-cache-dir ansible-core ansible-runner
+  prepend_galaxy:
+    - RUN ln -sf /usr/local/bin/python3 /usr/bin/python3
+  prepend_builder:
+    - RUN ln -sf /usr/local/bin/python3 /usr/bin/python3
+  prepend_final:
+    - RUN ln -sf /usr/local/bin/python3 /usr/bin/python3
+
+dependencies:
+  galaxy:
+    collections:
+      - name: ansible.posix
+  python:
+    - ansible-core
+    - ansible-runner
+    - rocannon

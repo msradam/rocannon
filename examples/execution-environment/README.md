@@ -17,10 +17,12 @@ ansible-builder build -t rocannon-ee:demo -f execution-environment.yml
 The image bakes in (verified): **rocannon 0.1.0, ansible-core 2.21.0,
 ansible.posix 2.2.0**.
 
-Base note: Rocannon needs Python 3.12+, so [`execution-environment.yml`](execution-environment.yml)
-builds on a `python:3.12` base and installs ansible-core/ansible-runner itself.
-For an org EE base that is already Python 3.12+ (an AAP `ee-minimal` image, say),
-swap `base_image` and drop the python-symlink build steps.
+Base note: ansible-core 2.21 requires Python 3.12+ (and so does Rocannon), so
+the default `ansible-runner` EE base (Python 3.9) will not work.
+[`execution-environment.yml`](execution-environment.yml) builds on a `python:3.12`
+base and installs ansible-core/ansible-runner itself. For an org EE base that is
+already Python 3.12+ (an AAP `ee-minimal` image, say), swap `base_image` and drop
+the python-symlink build steps.
 
 ## A frozen, deterministic tool surface
 

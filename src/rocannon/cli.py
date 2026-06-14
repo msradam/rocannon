@@ -521,7 +521,7 @@ def doc(
         typer.echo(json.dumps(schema, indent=2, default=str))
         return
 
-    typer.echo(f"{schema['name']}")
+    typer.echo(schema["name"])
     typer.echo(f"  {schema['description']}")
     typer.echo("")
     if not schema["parameters"]:
@@ -673,7 +673,7 @@ def search(
     ]
     matches.sort(key=lambda m: m[0])
     for name, desc in matches[:limit]:
-        typer.echo(f"{name}")
+        typer.echo(name)
         if desc:
             typer.echo(f"  {desc}")
     if len(matches) > limit:

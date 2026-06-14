@@ -23,6 +23,12 @@ from fastmcp import Client
 from rocannon.config import Config
 from rocannon.server import create_server
 
+# These exercise real third-party collections against a live container, so they
+# are integration tests (opt-in via `pytest -m integration`), like
+# test_ansible_integration.py. Without the marker they error in any environment
+# that lacks the collections (e.g. CI, which installs ansible-core only).
+pytestmark = pytest.mark.integration
+
 
 def _server(inventory: Path, modules: list[str]) -> Any:
     return create_server(Config(inventories=[inventory], modules=modules))

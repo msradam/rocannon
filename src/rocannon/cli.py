@@ -585,6 +585,13 @@ def run(
     timeout: Annotated[
         int | None, typer.Option(help="Override default execution timeout (seconds).")
     ] = None,
+    check: Annotated[
+        bool,
+        typer.Option("--check", help="Dry-run: report what would change without applying it."),
+    ] = False,
+    diff: Annotated[
+        bool, typer.Option("--diff", help="Return a diff of what this would change.")
+    ] = False,
     pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
     log_level: Annotated[
         LogLevel, typer.Option("--log-level", help="Logging level.")
@@ -612,6 +619,8 @@ def run(
         inventory=[str(p) for p in inventories],
         host_pattern=target,
         timeout=timeout,
+        check=check,
+        diff=diff,
     )
 
     typer.echo(json.dumps(result, indent=2 if pretty else None, default=str))
@@ -766,6 +775,15 @@ def playbook_run(
             readable=True,
         ),
     ],
+    check: Annotated[
+        bool,
+        typer.Option(
+            "--check", help="Dry-run every step: preview the runbook without applying it."
+        ),
+    ] = False,
+    diff: Annotated[
+        bool, typer.Option("--diff", help="Return a diff of what each step would change.")
+    ] = False,
     pretty: Annotated[bool, typer.Option("--pretty")] = False,
     log_level: Annotated[
         LogLevel, typer.Option("--log-level", help="Logging level.")
@@ -798,6 +816,8 @@ def playbook_run(
             module_args=module_args,
             inventory=inventory_strs,
             host_pattern=target,
+            check=check,
+            diff=diff,
         )
         typer.echo(json.dumps(result, indent=2 if pretty else None, default=str))
         status = result.get("status")
@@ -1008,7 +1028,22 @@ def _build_module_parser(
         help="Logging level (default: WARNING).",
     )
 
+    attributes = schema.get("attributes", {})
     reserved: set[str] = set(_MODULE_CLI_RESERVED)
+    if attributes.get("check_mode") in ("full", "partial"):
+        parser.add_argument(
+            "--check",
+            action="store_true",
+            help="Dry-run: report what would change without applying it (Ansible check mode).",
+        )
+        reserved.add("check")
+    if attributes.get("diff_mode") in ("full", "partial"):
+        parser.add_argument(
+            "--diff",
+            action="store_true",
+            help="Return a diff of what this would change (Ansible diff mode).",
+        )
+        reserved.add("diff")
     name_map: dict[str, str] = {}
     for param in schema.get("parameters", []):
         dest, ansible_name = _add_module_param(parser, param, reserved)
@@ -1070,6 +1105,8 @@ def _dispatch_module(fqcn: str, argv: list[str]) -> None:
         inventory=inv_paths,
         host_pattern=ns.target,
         timeout=ns.timeout,
+        check=getattr(ns, "check", False),
+        diff=getattr(ns, "diff", False),
     )
 
     if ns.record:

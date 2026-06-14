@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
 import keyword
 import logging
 import re
@@ -20,6 +19,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastmcp.dependencies import CurrentContext
 from fastmcp.server.context import Context
+from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from rocannon.correlation import get_call_metadata
@@ -111,7 +111,7 @@ def register_ansible_modules(
         )
 
     _add_ansible_resources(mcp, runtime, schema_cache)
-    report.resources_registered = 2  # inventory + module
+    report.resources_registered = 3  # inventory + module + collections
     report.hosts = len(union_hosts)
     report.groups = len(union_groups)
     report.profiles = registry.names()
@@ -157,10 +157,88 @@ def _add_ansible_resources(
             return {"error": f"module not registered: {fqcn}", "available": sorted(schema_cache)}
         return schema
 
+    @mcp.resource(
+        "rocannon://collections",
+        name="collections",
+        description="Collections exposed as tools, each with its registered module names.",
+        mime_type="application/json",
+    )
+    def _collections_resource() -> dict[str, Any]:
+        by_collection: dict[str, list[str]] = {}
+        for fqcn in sorted(schema_cache):
+            by_collection.setdefault(_collection_tag(fqcn), []).append(fqcn)
+        return {
+            "collections": [
+                {"name": coll, "modules": mods, "module_count": len(mods)}
+                for coll, mods in sorted(by_collection.items())
+            ]
+        }
+
 
 # ---------------------------------------------------------------------------
 # Tool registration internals
 # ---------------------------------------------------------------------------
+
+# Shared output schema for every module tool. The shape is stable: single-host
+# runs carry result/stdout/stderr; multi-host runs carry a `hosts` map; both
+# always carry `status`. additionalProperties keeps module-specific result keys.
+_RESULT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "status": {"type": "string", "description": "successful, failed, or error"},
+        "changed": {"type": "boolean"},
+        "result": {"type": "object", "additionalProperties": True},
+        "stdout": {"type": "string"},
+        "stderr": {"type": "string"},
+        "hosts": {
+            "type": "object",
+            "additionalProperties": True,
+            "description": "Per-host results when the target matched more than one host.",
+        },
+        "check_mode": {"type": "boolean", "description": "True when the call ran as a dry-run."},
+    },
+    "required": ["status"],
+    "additionalProperties": True,
+}
+
+# Builtins that only read state but carry no `facts` attribute or `_info`/`_facts`
+# suffix for the naming heuristic to catch.
+_READ_ONLY_BUILTINS: frozenset[str] = frozenset(
+    {
+        "ansible.builtin.ping",
+        "ansible.builtin.debug",
+        "ansible.builtin.assert",
+        "ansible.builtin.stat",
+        "ansible.builtin.slurp",
+        "ansible.builtin.find",
+        "ansible.builtin.getent",
+    }
+)
+
+_SUPPORTED_LEVELS = frozenset({"full", "partial"})
+
+
+def _build_annotations(module_name: str, attributes: dict[str, Any]) -> ToolAnnotations | None:
+    """Map ansible-doc module attributes to MCP tool hints.
+
+    Read-only: fact-gathering modules (the ``facts`` attribute), the
+    ``_info``/``_facts`` naming convention, and a few builtins that only query
+    state. Destructive and open-world: the free-form execution family (command,
+    shell, script, raw), which ansible-doc flags with the ``raw`` attribute.
+    Everything else is left unannotated; ansible-doc carries no idempotency
+    signal that would justify a stronger claim.
+    """
+    short = module_name.rsplit(".", 1)[-1]
+    read_only = (
+        attributes.get("facts")
+        or short.endswith(("_info", "_facts"))
+        or module_name in _READ_ONLY_BUILTINS
+    )
+    if read_only:
+        return ToolAnnotations(readOnlyHint=True)
+    if attributes.get("raw"):
+        return ToolAnnotations(destructiveHint=True, openWorldHint=True)
+    return None
 
 
 def _collection_tag(module_name: str) -> str:
@@ -237,6 +315,8 @@ def _register_tool(
         name=module_name,
         description=schema["description"],
         tags={_collection_tag(module_name)},
+        annotations=_build_annotations(module_name, schema.get("attributes", {})),
+        output_schema=_RESULT_SCHEMA,
     )(fn)
 
 
@@ -249,6 +329,9 @@ def _make_tool_fn(
     """Create an async tool function with a dynamic typed signature matching the Ansible module."""
     target_annotation = _build_target_annotation(inv)
     params = schema["parameters"]
+    attributes = schema.get("attributes", {})
+    inject_check = attributes.get("check_mode") in _SUPPORTED_LEVELS
+    inject_diff = attributes.get("diff_mode") in _SUPPORTED_LEVELS
 
     annotations: dict[str, Any] = {"target": target_annotation}
     sig_params: list[inspect.Parameter] = [
@@ -260,6 +343,10 @@ def _make_tool_fn(
     ]
 
     reserved = {"target", "ctx"}
+    if inject_check:
+        reserved.add("check")
+    if inject_diff:
+        reserved.add("diff")
     name_map: dict[str, str] = {}  # python_name → ansible_name
     seen_names: set[str] = set(reserved)
 
@@ -299,6 +386,40 @@ def _make_tool_fn(
                 )
             )
 
+    if inject_check:
+        check_desc = (
+            "Dry-run: report what would change without applying it (Ansible check mode)."
+            if attributes["check_mode"] == "full"
+            else (
+                "Dry-run without applying changes (Ansible check mode). This module's "
+                "check-mode support is partial, so some results may be incomplete."
+            )
+        )
+        check_ann = Annotated[bool, Field(description=check_desc)]
+        annotations["check"] = check_ann
+        sig_params.append(
+            inspect.Parameter(
+                "check",
+                inspect.Parameter.KEYWORD_ONLY,
+                annotation=check_ann,
+                default=False,
+            )
+        )
+    if inject_diff:
+        diff_desc = "Return a diff of what this would change (Ansible diff mode)."
+        if attributes["diff_mode"] == "partial":
+            diff_desc += " Diff support for this module is partial."
+        diff_ann = Annotated[bool, Field(description=diff_desc)]
+        annotations["diff"] = diff_ann
+        sig_params.append(
+            inspect.Parameter(
+                "diff",
+                inspect.Parameter.KEYWORD_ONLY,
+                annotation=diff_ann,
+                default=False,
+            )
+        )
+
     # Context injection, invisible to the model
     annotations["ctx"] = Context
     sig_params.append(
@@ -310,9 +431,11 @@ def _make_tool_fn(
         )
     )
 
-    async def tool_fn(**kwargs: Any) -> str:
+    async def tool_fn(**kwargs: Any) -> dict[str, Any]:
         ctx: Context = kwargs.pop("ctx", None)
         target: str = kwargs.pop("target")
+        check: bool = kwargs.pop("check", False)
+        diff: bool = kwargs.pop("diff", False)
 
         module_args = {name_map.get(k, k): v for k, v in kwargs.items() if v is not None}
 
@@ -336,7 +459,7 @@ def _make_tool_fn(
             if meta is not None:
                 meta["result"] = err
                 meta["status"] = "error"
-            return json.dumps(err, indent=2, default=str)
+            return err
 
         cfg = runtime.active_config()
         inventory_list = build_inventory_list(cfg.inventories)
@@ -360,13 +483,15 @@ def _make_tool_fn(
             host_pattern=target,
             timeout=module_timeout,
             envvars=envvars,
+            check=check,
+            diff=diff,
         )
 
         if meta is not None:
             meta["result"] = result
             meta["status"] = result.get("status", "ok")
 
-        return json.dumps(result, indent=2, default=str)
+        return result
 
     tool_fn.__annotations__ = annotations
     tool_fn.__signature__ = inspect.Signature(sig_params)  # type: ignore[attr-defined]

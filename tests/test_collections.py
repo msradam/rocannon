@@ -44,7 +44,8 @@ def _result(raw: Any) -> dict[str, Any]:
 
 class TestAnsiblePosix:
     @pytest.fixture(scope="class")
-    def server(self, ubuntu_container: Path) -> Any:
+    @staticmethod
+    def server(ubuntu_container: Path) -> Any:
         return _server(
             ubuntu_container,
             [
@@ -91,7 +92,8 @@ class TestAnsiblePosix:
 
 class TestCommunityGeneral:
     @pytest.fixture(scope="class")
-    def server(self, ubuntu_container: Path) -> Any:
+    @staticmethod
+    def server(ubuntu_container: Path) -> Any:
         return _server(
             ubuntu_container,
             [
@@ -170,7 +172,8 @@ class TestCommunityGeneral:
 
 class TestCommunityCrypto:
     @pytest.fixture(scope="class")
-    def server(self, ubuntu_container: Path) -> Any:
+    @staticmethod
+    def server(ubuntu_container: Path) -> Any:
         return _server(
             ubuntu_container,
             [

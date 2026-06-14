@@ -110,6 +110,27 @@ def _parse_module_doc(module_name: str, module_doc: dict[str, Any]) -> dict[str,
         "name": module_name,
         "description": _flatten_description(description),
         "parameters": parameters,
+        "attributes": _parse_attributes(doc_entry.get("attributes") or {}),
+    }
+
+
+def _parse_attributes(attributes: dict[str, Any]) -> dict[str, Any]:
+    """Pull the execution-relevant flags out of ansible-doc's attributes block.
+
+    ``check_mode``/``diff_mode`` carry a ``support`` level (full/partial/none);
+    ``facts`` and ``raw`` are presence flags. These drive the MCP tool hints and
+    the dry-run parameters built in ``rocannon.ansible``.
+    """
+
+    def support(key: str) -> str | None:
+        entry = attributes.get(key)
+        return entry.get("support") if isinstance(entry, dict) else None
+
+    return {
+        "check_mode": support("check_mode"),
+        "diff_mode": support("diff_mode"),
+        "facts": "facts" in attributes,
+        "raw": "raw" in attributes,
     }
 
 

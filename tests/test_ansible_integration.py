@@ -192,6 +192,27 @@ class TestAnsibleExecution:
             assert "hunter2" not in text, "secret leaked into tool result"
             assert "REDACTED" in text or "password=" not in text
 
+    @_skip_no_docker
+    async def test_check_mode_previews_without_applying(self, ansible_inventory: Path) -> None:
+        cfg = Config(
+            inventories=[ansible_inventory],
+            modules=["ansible.builtin.file", "ansible.builtin.stat"],
+        )
+        server = create_server(cfg)
+        path = f"/tmp/rocannon_check_{uuid.uuid4().hex[:8]}"
+        async with Client(server) as c:
+            preview = await c.call_tool(
+                "ansible.builtin.file",
+                {"target": "ubi9", "path": path, "state": "directory", "check": True},
+            )
+            assert preview.structured_content is not None
+            assert preview.structured_content["check_mode"] is True
+            assert preview.structured_content["changed"] is True  # would create it
+
+            after = await c.call_tool("ansible.builtin.stat", {"target": "ubi9", "path": path})
+            assert after.structured_content is not None
+            assert after.structured_content["result"]["stat"]["exists"] is False
+
 
 # ---------------------------------------------------------------------------
 # Schema fidelity, what we register matches the upstream catalog

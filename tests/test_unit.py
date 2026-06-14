@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from rocannon.ansible import _build_annotations, _make_tool_fn
 from rocannon.config import Config, load_profile
 from rocannon.correlation import (
     CorrelationFormatter,
@@ -34,6 +35,7 @@ from rocannon.redaction import REDACTED, redact, redact_text
 from rocannon.schema import (
     ANSIBLE_TYPE_MAP,
     SchemaFetchError,
+    _parse_attributes,
     expand_modules,
     fetch_module_schema,
 )
@@ -372,6 +374,130 @@ class TestFetchModuleSchema:
         for ansible_type in ["str", "int", "bool", "list", "dict", "path", "raw"]:
             assert ansible_type in ANSIBLE_TYPE_MAP
 
+    def test_attributes_extracted_from_doc(self) -> None:
+        doc = {
+            "ansible.builtin.copy": {
+                "doc": {
+                    "short_description": "Copy files",
+                    "options": {},
+                    "attributes": {
+                        "check_mode": {"support": "full"},
+                        "diff_mode": {"support": "partial"},
+                    },
+                }
+            }
+        }
+        completed = MagicMock()
+        completed.returncode = 0
+        completed.stdout = json.dumps(doc)
+        with patch("rocannon.schema.subprocess.run", return_value=completed):
+            schema = fetch_module_schema("ansible.builtin.copy")
+        assert schema["attributes"]["check_mode"] == "full"
+        assert schema["attributes"]["diff_mode"] == "partial"
+
+
+class TestParseAttributes:
+    def test_extracts_support_levels(self) -> None:
+        attrs = _parse_attributes(
+            {"check_mode": {"support": "full"}, "diff_mode": {"support": "none"}}
+        )
+        assert attrs["check_mode"] == "full"
+        assert attrs["diff_mode"] == "none"
+
+    def test_facts_and_raw_presence_flags(self) -> None:
+        attrs = _parse_attributes({"facts": {"support": "full"}, "raw": {"support": "full"}})
+        assert attrs["facts"] is True
+        assert attrs["raw"] is True
+
+    def test_missing_attributes_default_to_none_and_false(self) -> None:
+        assert _parse_attributes({}) == {
+            "check_mode": None,
+            "diff_mode": None,
+            "facts": False,
+            "raw": False,
+        }
+
+
+class TestBuildAnnotations:
+    """ansible.py, _build_annotations maps ansible-doc attributes to MCP hints."""
+
+    def test_facts_module_is_read_only(self) -> None:
+        ann = _build_annotations("community.general.thing_facts", {"facts": True})
+        assert ann is not None
+        assert ann.readOnlyHint is True
+
+    def test_info_suffix_is_read_only(self) -> None:
+        ann = _build_annotations("community.general.widget_info", {})
+        assert ann is not None
+        assert ann.readOnlyHint is True
+
+    def test_curated_builtin_is_read_only(self) -> None:
+        ann = _build_annotations("ansible.builtin.ping", {})
+        assert ann is not None
+        assert ann.readOnlyHint is True
+
+    def test_raw_family_is_destructive_and_open_world(self) -> None:
+        ann = _build_annotations("ansible.builtin.command", {"raw": True})
+        assert ann is not None
+        assert ann.destructiveHint is True
+        assert ann.openWorldHint is True
+        assert ann.readOnlyHint is None
+
+    def test_plain_state_module_is_unannotated(self) -> None:
+        assert _build_annotations("ansible.builtin.copy", {"check_mode": "full"}) is None
+
+
+def _tool_signature(schema: dict[str, Any]) -> Any:
+    import inspect
+
+    fn = _make_tool_fn("a.b.c", schema, {"hosts": ["h1"], "groups": []}, MagicMock())
+    return inspect.signature(fn).parameters
+
+
+def _schema_with_attrs(
+    check: str | None, diff: str | None, params: list[dict] | None = None
+) -> dict:
+    return {
+        "name": "a.b.c",
+        "description": "d",
+        "parameters": params or [],
+        "attributes": {"check_mode": check, "diff_mode": diff, "facts": False, "raw": False},
+    }
+
+
+class TestDryRunParams:
+    """ansible.py, _make_tool_fn injects check/diff gated by ansible-doc support."""
+
+    def test_check_injected_when_supported(self) -> None:
+        params = _tool_signature(_schema_with_attrs("full", "none"))
+        assert "check" in params
+        assert params["check"].default is False
+        assert "diff" not in params
+
+    def test_partial_support_still_injects_check(self) -> None:
+        assert "check" in _tool_signature(_schema_with_attrs("partial", "none"))
+
+    def test_diff_injected_when_supported(self) -> None:
+        assert "diff" in _tool_signature(_schema_with_attrs("full", "full"))
+
+    def test_no_params_when_support_is_none(self) -> None:
+        params = _tool_signature(_schema_with_attrs("none", "none"))
+        assert "check" not in params
+        assert "diff" not in params
+
+    def test_no_params_when_attributes_absent(self) -> None:
+        params = _tool_signature({"name": "a.b.c", "description": "d", "parameters": []})
+        assert "check" not in params
+        assert "diff" not in params
+
+    def test_module_param_named_check_is_renamed(self) -> None:
+        schema = _schema_with_attrs(
+            "full", "none", params=[{"name": "check", "type": "str", "required": False}]
+        )
+        params = _tool_signature(schema)
+        assert params["check"].default is False  # the injected dry-run flag
+        assert "module_check" in params  # the module's own colliding param
+
 
 # ---------------------------------------------------------------------------
 # executor.py, _parse_runner_result
@@ -616,6 +742,44 @@ class TestRunModule:
         monkeypatch.setenv("ROCANNON_IDLE_TIMEOUT", "")
         assert resolve_timeout() == DEFAULT_TIMEOUT
         assert resolve_idle_timeout() == DEFAULT_IDLE_TIMEOUT
+
+
+class TestRunModuleCheckDiff:
+    """check/diff become play-level keywords and mark the result."""
+
+    def _run(self, tmp_path: Path, **kw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+        import yaml as yaml_mod
+
+        captured: dict[str, Any] = {}
+
+        def fake_run(**kwargs: Any) -> Any:
+            captured["play"] = yaml_mod.safe_load(Path(kwargs["playbook"]).read_text())[0]
+            return _make_runner(events=[_host_event("h1")])
+
+        with patch("rocannon.executor.ansible_runner.run", side_effect=fake_run):
+            result = run_module(
+                module="ansible.builtin.copy",
+                module_args={},
+                inventory=[str(tmp_path)],
+                host_pattern="h1",
+                **kw,
+            )
+        return captured["play"], result
+
+    def test_check_sets_play_keyword_and_marks_result(self, tmp_path: Path) -> None:
+        play, result = self._run(tmp_path, check=True)
+        assert play["check_mode"] is True
+        assert result["check_mode"] is True
+
+    def test_diff_sets_play_keyword(self, tmp_path: Path) -> None:
+        play, _ = self._run(tmp_path, diff=True)
+        assert play["diff"] is True
+
+    def test_default_leaves_play_and_result_unmarked(self, tmp_path: Path) -> None:
+        play, result = self._run(tmp_path)
+        assert "check_mode" not in play
+        assert "diff" not in play
+        assert "check_mode" not in result
 
 
 class TestBuildEnvvars:
@@ -1079,6 +1243,7 @@ import argparse  # noqa: E402
 from rocannon.cli import (  # noqa: E402
     _add_module_param,
     _append_to_record,
+    _build_module_parser,
     _looks_like_fqcn,
     _safe_record_name,
 )
@@ -1166,6 +1331,29 @@ class TestModuleParamArgparseBuilding:
         assert dest == "module_target"
         ns = p.parse_args(["--module-target", "x"])
         assert ns.module_target == "x"
+
+
+class TestCliDryRunFlags:
+    """rocannon <fqcn> exposes --check/--diff gated by ansible-doc support."""
+
+    def _parser(self, check: str | None, diff: str | None) -> Any:
+        schema = {
+            "name": "a.b.c",
+            "description": "d",
+            "parameters": [],
+            "attributes": {"check_mode": check, "diff_mode": diff, "facts": False, "raw": False},
+        }
+        parser, _ = _build_module_parser("a.b.c", schema)
+        return parser
+
+    def test_flags_present_when_supported(self) -> None:
+        ns = self._parser("full", "full").parse_args(["--target", "h1", "--check", "--diff"])
+        assert ns.check is True
+        assert ns.diff is True
+
+    def test_check_absent_when_unsupported(self) -> None:
+        with pytest.raises(SystemExit):
+            self._parser("none", "none").parse_args(["--target", "h1", "--check"])
 
 
 class TestAppendToRecord:

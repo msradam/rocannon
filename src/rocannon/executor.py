@@ -77,8 +77,15 @@ def run_module(
     timeout: int | None = None,
     idle_timeout: int | None = None,
     envvars: dict[str, str] | None = None,
+    check: bool = False,
+    diff: bool = False,
 ) -> dict[str, Any]:
-    """Execute an Ansible module via ansible-runner and return structured results."""
+    """Execute an Ansible module via ansible-runner and return structured results.
+
+    ``check`` runs the play in Ansible check mode (dry-run, no changes applied);
+    ``diff`` asks modules to report what they would change. Both are play-level
+    keywords, gated per module by the caller against ansible-doc support levels.
+    """
     if timeout is None:
         timeout = resolve_timeout()
     if idle_timeout is None:
@@ -102,6 +109,10 @@ def run_module(
             }
         ],
     }
+    if check:
+        play["check_mode"] = True
+    if diff:
+        play["diff"] = True
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
         yaml.dump([play], f)
@@ -128,7 +139,10 @@ def run_module(
         with contextlib.suppress(Exception):
             os.unlink(playbook_path)
 
-    return _parse_runner_result(runner)
+    result = _parse_runner_result(runner)
+    if check:
+        result["check_mode"] = True
+    return result
 
 
 def build_inventory_list(inventory_paths: list[Path]) -> list[str]:

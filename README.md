@@ -1,7 +1,7 @@
-# Rocannon
+<h1 align="center">Rocannon</h1>
 
 <p align="center">
-  <img src="docs/assets/gryphon.svg" alt="" width="120">
+  <img src="https://raw.githubusercontent.com/msradam/rocannon/main/docs/assets/gryphon.svg" alt="" width="120">
 </p>
 
 Rocannon is an MCP server that registers every installed Ansible module as a
@@ -9,6 +9,11 @@ typed tool. It reads `ansible-doc -j` for each module at startup and builds a
 Pydantic-validated function signature, then exposes the result over the MCP
 protocol (stdio or HTTP). Any MCP client (Claude Code, Cursor, mcphost,
 custom agents) calls the same tools an operator would call from a REPL.
+
+Each registered tool carries the module's own `ansible-doc` metadata: a JSON
+output schema for structured results, and MCP safety hints derived from the
+module's attributes (read-only for fact modules, destructive and open-world for
+`command`, `shell`, `script`, and `raw`).
 
 Every module is also a top-level CLI subcommand:
 
@@ -21,11 +26,16 @@ Append `--record path/to/runbook.yml` to any invocation and Rocannon writes
 each call as a new play in a real Ansible playbook. The resulting file runs
 directly under `ansible-playbook -i <inv> path/to/runbook.yml`.
 
+Add `--check` to preview a change without applying it (Ansible check mode) and
+`--diff` to see what would change. Each is offered per module according to its
+declared check-mode support, both on the CLI and as a parameter on the matching
+MCP tool. `rocannon playbook run <name> --check` previews an entire saved runbook.
+
 Sessions driven via the MCP server save the same way: as Ansible playbooks
 under `.rocannon/playbooks/`. Rocannon also loads them back on next startup
 as MCP prompts.
 
-![demo](docs/assets/demo.gif)
+![demo](https://raw.githubusercontent.com/msradam/rocannon/main/docs/assets/demo.gif)
 
 ## Install
 
@@ -77,7 +87,8 @@ rocannon playbook      list/show/run saved playbooks
 ```
 
 Per-module help (typed flags, defaults, descriptions from `ansible-doc`):
-`rocannon ansible.builtin.copy --help`.
+`rocannon ansible.builtin.copy --help`. Modules that support check mode also
+accept `--check` and `--diff`.
 
 ## Profiles
 
@@ -145,6 +156,8 @@ uv run pytest -m integration    # opt-in: spins up a real UBI9 container
 ```
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for how the pieces fit together.
+
+Rocannon is developed with AI assistance.
 
 ## The name
 

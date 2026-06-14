@@ -32,6 +32,15 @@ COPY_SCHEMA: dict[str, Any] = {
     ],
 }
 
+COMMAND_SCHEMA: dict[str, Any] = {
+    "name": "ansible.builtin.command",
+    "description": "Run a command",
+    "parameters": [
+        {"name": "cmd", "description": "the command", "type": "str", "required": False},
+    ],
+    "attributes": {"check_mode": "partial", "diff_mode": "none", "facts": False, "raw": True},
+}
+
 
 def _ok_result(host: str = "h1") -> dict[str, Any]:
     return {
@@ -59,7 +68,11 @@ def _build_server(inv: Path, modules: list[str]) -> Any:
     """
     from rocannon.server import create_server
 
-    schemas = {"ansible.builtin.ping": PING_SCHEMA, "ansible.builtin.copy": COPY_SCHEMA}
+    schemas = {
+        "ansible.builtin.ping": PING_SCHEMA,
+        "ansible.builtin.copy": COPY_SCHEMA,
+        "ansible.builtin.command": COMMAND_SCHEMA,
+    }
 
     def _fetch(name: str) -> dict[str, Any]:
         return schemas[name]
@@ -169,3 +182,123 @@ class TestAuditMiddleware:
         assert payload["status"] == "successful"
         assert len(payload["request_id"]) == 8
         assert isinstance(payload["latency_ms"], int)
+
+
+class TestStructuredOutput:
+    async def test_tool_declares_output_schema(self, inventory_file: Path) -> None:
+        server = _build_server(inventory_file, ["ansible.builtin.ping"])
+        async with Client(server) as client:
+            tools = {t.name: t for t in await client.list_tools()}
+        assert tools["ansible.builtin.ping"].outputSchema is not None
+
+    async def test_result_is_structured_content(self, inventory_file: Path) -> None:
+        server = _build_server(inventory_file, ["ansible.builtin.ping"])
+        with patch("rocannon.ansible.run_module", return_value=_ok_result()):
+            async with Client(server) as client:
+                result = await client.call_tool("ansible.builtin.ping", {"target": "h1"})
+        assert result.structured_content == _ok_result()
+        # The text block stays valid JSON so existing string-parsing clients work.
+        assert json.loads(result.content[0].text)["status"] == "successful"
+
+
+class TestToolAnnotations:
+    async def test_read_only_module_annotated(self, inventory_file: Path) -> None:
+        server = _build_server(inventory_file, ["ansible.builtin.ping"])
+        async with Client(server) as client:
+            tools = {t.name: t for t in await client.list_tools()}
+        assert tools["ansible.builtin.ping"].annotations.readOnlyHint is True
+
+    async def test_raw_family_module_flagged_destructive(self, inventory_file: Path) -> None:
+        server = _build_server(inventory_file, ["ansible.builtin.command"])
+        async with Client(server) as client:
+            tools = {t.name: t for t in await client.list_tools()}
+        annotations = tools["ansible.builtin.command"].annotations
+        assert annotations.destructiveHint is True
+        assert annotations.openWorldHint is True
+
+
+class TestDryRunPassThrough:
+    async def test_check_flag_reaches_executor_not_module_args(self, inventory_file: Path) -> None:
+        server = _build_server(inventory_file, ["ansible.builtin.command"])
+        with patch("rocannon.ansible.run_module", return_value=_ok_result()) as mock_run:
+            async with Client(server) as client:
+                await client.call_tool(
+                    "ansible.builtin.command",
+                    {"target": "h1", "cmd": "id", "check": True},
+                )
+        kwargs = mock_run.call_args[1]
+        assert kwargs["check"] is True
+        assert "check" not in kwargs["module_args"]
+        assert kwargs["module_args"] == {"cmd": "id"}
+
+
+class TestLivePlaybookPrompts:
+    async def test_save_playbook_registers_prompt_without_restart(
+        self, inventory_file: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ROCANNON_DATA_DIR", str(tmp_path))
+        server = _build_server(inventory_file, ["ansible.builtin.ping"])
+        async with Client(server) as client:
+            assert "playbook_sess1" not in {p.name for p in await client.list_prompts()}
+            res = await client.call_tool(
+                "save_playbook",
+                {
+                    "name": "sess1",
+                    "description": "demo",
+                    "steps": [{"tool": "ansible.builtin.ping", "args": {"target": "h1"}}],
+                },
+            )
+            payload = res.structured_content
+            assert payload["ok"] is True
+            assert payload["prompt"] == "playbook_sess1"
+            assert "restart" not in payload["note"].lower()
+            assert "playbook_sess1" in {p.name for p in await client.list_prompts()}
+
+    async def test_commit_session_registers_prompt(
+        self, inventory_file: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ROCANNON_DATA_DIR", str(tmp_path))
+        server = _build_server(inventory_file, ["ansible.builtin.ping"])
+        with patch("rocannon.ansible.run_module", return_value=_ok_result()):
+            async with Client(server) as client:
+                await client.call_tool("ansible.builtin.ping", {"target": "h1"})
+                res = await client.call_tool("commit_session", {"name": "sess2"})
+                assert res.structured_content["ok"] is True
+                assert "playbook_sess2" in {p.name for p in await client.list_prompts()}
+
+
+class TestDiscoveryResources:
+    async def test_profiles_resource(self, inventory_file: Path) -> None:
+        server = _build_server(inventory_file, ["ansible.builtin.ping"])
+        async with Client(server) as client:
+            contents = await client.read_resource("rocannon://profiles")
+        data = json.loads(contents[0].text)
+        assert data["active"] == "default"
+        assert any("ansible.builtin.ping" in p["modules"] for p in data["profiles"])
+
+    async def test_collections_resource(self, inventory_file: Path) -> None:
+        server = _build_server(inventory_file, ["ansible.builtin.ping", "ansible.builtin.copy"])
+        async with Client(server) as client:
+            contents = await client.read_resource("rocannon://collections")
+        data = json.loads(contents[0].text)
+        builtin = next(c for c in data["collections"] if c["name"] == "ansible.builtin")
+        assert "ansible.builtin.ping" in builtin["modules"]
+        assert builtin["module_count"] == 2
+
+    async def test_playbooks_resource_lists_saved(
+        self, inventory_file: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ROCANNON_DATA_DIR", str(tmp_path))
+        server = _build_server(inventory_file, ["ansible.builtin.ping"])
+        async with Client(server) as client:
+            await client.call_tool(
+                "save_playbook",
+                {
+                    "name": "rb1",
+                    "description": "d",
+                    "steps": [{"tool": "ansible.builtin.ping", "args": {"target": "h1"}}],
+                },
+            )
+            contents = await client.read_resource("rocannon://playbooks")
+        data = json.loads(contents[0].text)
+        assert any(pb["name"] == "rb1" for pb in data)

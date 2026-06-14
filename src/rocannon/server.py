@@ -7,10 +7,12 @@ import time
 from typing import Any
 
 from fastmcp import FastMCP
+from fastmcp.server.context import Context
 from fastmcp.server.middleware import Middleware, MiddlewareContext, PingMiddleware
 from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware, RetryMiddleware
 from fastmcp.server.middleware.logging import StructuredLoggingMiddleware
 from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
+from mcp.types import PromptListChangedNotification
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -223,6 +225,7 @@ def create_server(
     _add_runs_resources(mcp, history)
     _add_save_tools(mcp, all_tool_names, history)
     _add_profile_tools(mcp, runtime)
+    _add_discovery_resources(mcp, runtime)
     all_tool_names.update(
         {
             "save_playbook",
@@ -332,6 +335,48 @@ def _add_profile_tools(mcp: FastMCP, runtime: RuntimeContext) -> None:
         }
 
 
+def _add_discovery_resources(mcp: FastMCP, runtime: RuntimeContext) -> None:
+    """Read-only resources for discovering profiles and saved playbooks."""
+
+    @mcp.resource(
+        "rocannon://profiles",
+        name="profiles",
+        description="Known profiles, their inventories and modules, and which is active.",
+        mime_type="application/json",
+    )
+    def _profiles_resource() -> dict[str, Any]:
+        return {
+            "active": runtime.active_name,
+            "default": runtime.registry.default_name,
+            "profiles": [
+                {
+                    "name": p.name,
+                    "path": str(p.path),
+                    "inventories": [str(i) for i in p.config.inventories],
+                    "modules": list(p.config.modules),
+                }
+                for p in runtime.registry.profiles.values()
+            ],
+        }
+
+    @mcp.resource(
+        "rocannon://playbooks",
+        name="playbooks",
+        description="Saved playbooks under .rocannon/playbooks/ (name, description, step count).",
+        mime_type="application/json",
+    )
+    def _playbooks_resource() -> list[dict[str, Any]]:
+        return [
+            {
+                "name": name,
+                "description": pb.description,
+                "steps": len(pb.steps),
+                "tools": [s.tool for s in pb.steps],
+            }
+            for name, pb in sorted(load_all_playbooks().items())
+        ]
+
+
 def _add_middlewares(mcp: FastMCP, config: Config) -> None:
     """Compose the server's middleware stack.
 
@@ -416,6 +461,37 @@ def _playbook_prompt_body(pb: Playbook) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _build_playbook_prompt(name: str, pb: Playbook) -> Any:
+    """Build the MCP prompt that replays a saved playbook."""
+    from fastmcp.prompts.function_prompt import FunctionPrompt
+
+    body = _playbook_prompt_body(pb)
+    prompt_name = f"playbook_{name}"
+
+    def _fn(body: str = body) -> str:
+        return body
+
+    _fn.__name__ = prompt_name
+    return FunctionPrompt.from_function(
+        _fn,
+        name=prompt_name,
+        description=pb.description or f"Replay saved playbook '{name}'.",
+        tags={"rocannon.playbook"},
+    )
+
+
+async def _register_and_notify(mcp: FastMCP, ctx: Context | None, pb: Playbook) -> None:
+    """Register a freshly saved playbook as a prompt and tell connected clients.
+
+    This is what lets a recorded session replay immediately, without the
+    restart that the on-startup registration in ``_register_playbook_prompts``
+    would otherwise require.
+    """
+    mcp.add_prompt(_build_playbook_prompt(pb.name, pb))
+    if ctx is not None:
+        await ctx.send_notification(PromptListChangedNotification())
+
+
 def _register_playbook_prompts(mcp: FastMCP, tool_names: set[str]) -> int:
     """Load .rocannon/playbooks/*.yml and register each as an MCP prompt.
 
@@ -423,8 +499,6 @@ def _register_playbook_prompts(mcp: FastMCP, tool_names: set[str]) -> int:
     referencing a tool not in this server's surface is skipped with WARN, never
     registered as a half-broken prompt.
     """
-    from fastmcp.prompts.function_prompt import FunctionPrompt
-
     playbooks = load_all_playbooks()
     if not playbooks:
         return 0
@@ -439,21 +513,7 @@ def _register_playbook_prompts(mcp: FastMCP, tool_names: set[str]) -> int:
                 "; ".join(problems),
             )
             continue
-
-        body = _playbook_prompt_body(pb)
-        prompt_name = f"playbook_{name}"
-
-        def _fn(body: str = body) -> str:
-            return body
-
-        _fn.__name__ = prompt_name
-        prompt = FunctionPrompt.from_function(
-            _fn,
-            name=prompt_name,
-            description=pb.description or f"Replay saved playbook '{name}'.",
-            tags={"rocannon.playbook"},
-        )
-        mcp.add_prompt(prompt)
+        mcp.add_prompt(_build_playbook_prompt(name, pb))
         registered += 1
 
     if registered:
@@ -478,10 +538,11 @@ def _add_save_tools(
         ),
         tags={"rocannon.meta"},
     )
-    def _save_playbook_tool(
+    async def _save_playbook_tool(
         name: str,
         description: str,
         steps: list[dict[str, Any]],
+        ctx: Context,
         overwrite: bool = False,
     ) -> dict[str, Any]:
         try:
@@ -496,12 +557,14 @@ def _add_save_tools(
             path = save_playbook(pb, overwrite=overwrite)
         except PlaybookError as exc:
             return {"ok": False, "error": str(exc)}
+        await _register_and_notify(mcp, ctx, pb)
         return {
             "ok": True,
             "name": pb.name,
             "path": str(path),
             "steps": len(pb.steps),
-            "note": "Restart the server to load this playbook as an MCP prompt.",
+            "prompt": f"playbook_{pb.name}",
+            "note": f"Available now as the prompt 'playbook_{pb.name}'.",
         }
 
     @mcp.tool(
@@ -514,8 +577,9 @@ def _add_save_tools(
         ),
         tags={"rocannon.meta"},
     )
-    def _commit_session_tool(
+    async def _commit_session_tool(
         name: str,
+        ctx: Context,
         description: str = "",
         since: str | None = None,
         overwrite: bool = False,
@@ -546,13 +610,15 @@ def _add_save_tools(
             path = save_playbook(pb, overwrite=overwrite)
         except PlaybookError as exc:
             return {"ok": False, "error": str(exc)}
+        await _register_and_notify(mcp, ctx, pb)
         return {
             "ok": True,
             "name": pb.name,
             "path": str(path),
             "steps": len(pb.steps),
             "from_request_ids": [e.request_id for e in successful],
-            "note": "Restart the server to load this playbook as an MCP prompt.",
+            "prompt": f"playbook_{pb.name}",
+            "note": f"Available now as the prompt 'playbook_{pb.name}'.",
         }
 
 

@@ -301,6 +301,82 @@ def mcp_doctor(
 
 
 # ---------------------------------------------------------------------------
+# `quickstart`, scaffold a localhost profile and print client wiring
+# ---------------------------------------------------------------------------
+
+_QUICKSTART_INVENTORY = "[local]\nlocalhost ansible_connection=local\n"
+
+_QUICKSTART_PROFILE = """\
+# Rocannon quickstart profile. Targets localhost via the local connection.
+inventories:
+  - ./inventory.ini
+
+modules:
+  - ansible.builtin.ping
+  - ansible.builtin.command
+  - ansible.builtin.setup
+  - ansible.builtin.debug
+"""
+
+
+@app.command()
+def quickstart(
+    directory: Annotated[
+        Path,
+        typer.Option("--dir", help="Where to scaffold the quickstart files."),
+    ] = Path(".rocannon"),
+    force: Annotated[
+        bool, typer.Option("--force", help="Overwrite existing quickstart files.")
+    ] = False,
+) -> None:
+    """Scaffold a localhost profile and wire Rocannon into your MCP client.
+
+    Writes a ready-to-run profile (localhost via the local connection, a few
+    ansible.builtin modules) and prints the exact client configuration so you
+    get to a first tool call without hand-editing YAML.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    profile_path = directory / "quickstart.yml"
+    inventory_path = directory / "inventory.ini"
+
+    exists = profile_path.exists() or inventory_path.exists()
+    if exists and not force:
+        typer.echo(f"Quickstart files already exist in {directory}/ (use --force to overwrite).")
+    else:
+        inventory_path.write_text(_QUICKSTART_INVENTORY)
+        profile_path.write_text(_QUICKSTART_PROFILE)
+        typer.secho("Scaffolded:", bold=True)
+        typer.echo(f"  {profile_path}")
+        typer.echo(f"  {inventory_path}")
+
+    abs_profile = profile_path.resolve()
+
+    typer.echo("")
+    typer.secho("Verify the tools register:", bold=True)
+    typer.echo(f"  rocannon mcp doctor --profile {abs_profile}")
+
+    typer.echo("")
+    typer.secho("Add to Claude Code:", bold=True)
+    typer.echo(f"  claude mcp add rocannon -- rocannon mcp serve --profile {abs_profile}")
+
+    typer.echo("")
+    typer.secho("Or add to an MCP client config (.mcp.json, Claude Desktop, Cursor):", bold=True)
+    snippet = {
+        "mcpServers": {
+            "rocannon": {
+                "command": "rocannon",
+                "args": ["mcp", "serve", "--profile", str(abs_profile)],
+            }
+        }
+    }
+    typer.echo(json.dumps(snippet, indent=2))
+
+    typer.echo("")
+    typer.secho("Then ask your assistant:", bold=True)
+    typer.echo('  "Gather facts from localhost and tell me the OS and kernel version."')
+
+
+# ---------------------------------------------------------------------------
 # `doctor`, preflight diagnostics
 # ---------------------------------------------------------------------------
 

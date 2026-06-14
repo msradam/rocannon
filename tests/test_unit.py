@@ -542,6 +542,22 @@ class TestParseRunnerResult:
         assert "hosts" not in result
         assert result["changed"] is False
 
+    def test_list_stdout_coerced_to_text(self) -> None:
+        # Network modules (e.g. arista.eos.eos_command) return stdout as a list
+        # of per-command outputs; it must not crash redaction.
+        events = [
+            {
+                "event_data": {
+                    "host": "ceos1",
+                    "res": {"changed": False, "stdout": ["line one", "line two"], "stderr": []},
+                }
+            }
+        ]
+        runner = _make_runner(events=events)
+        result = _parse_runner_result(runner)
+        assert result["stdout"] == "line one\nline two"
+        assert result["stderr"] == ""
+
     def test_multi_host_aggregated(self) -> None:
         runner = _make_runner(events=[_host_event("host1"), _host_event("host2", changed=True)])
         result = _parse_runner_result(runner)
@@ -1400,3 +1416,49 @@ class TestAppendToRecord:
         # Module key is the FQCN; args are a dict under it
         assert "ansible.builtin.ping" in task
         assert task["ansible.builtin.ping"] == {"data": "pong"}
+
+
+# ---------------------------------------------------------------------------
+# cli.py, `quickstart`
+# ---------------------------------------------------------------------------
+
+
+class TestQuickstart:
+    def test_scaffolds_profile_and_inventory(self, tmp_path: Path) -> None:
+        from typer.testing import CliRunner
+
+        from rocannon.cli import app
+
+        target = tmp_path / ".rocannon"
+        result = CliRunner().invoke(app, ["quickstart", "--dir", str(target)])
+        assert result.exit_code == 0
+
+        profile = target / "quickstart.yml"
+        inventory = target / "inventory.ini"
+        assert profile.exists()
+        assert inventory.exists()
+        assert "ansible_connection=local" in inventory.read_text()
+        assert "ansible.builtin.setup" in profile.read_text()
+
+        # Wiring is printed for both Claude Code and a generic client config.
+        assert "claude mcp add rocannon" in result.stdout
+        assert "mcpServers" in result.stdout
+
+    def test_does_not_overwrite_without_force(self, tmp_path: Path) -> None:
+        from typer.testing import CliRunner
+
+        from rocannon.cli import app
+
+        target = tmp_path / ".rocannon"
+        runner = CliRunner()
+        runner.invoke(app, ["quickstart", "--dir", str(target)])
+        (target / "quickstart.yml").write_text("custom: true\n")
+
+        result = runner.invoke(app, ["quickstart", "--dir", str(target)])
+        assert result.exit_code == 0
+        assert "already exist" in result.stdout
+        assert (target / "quickstart.yml").read_text() == "custom: true\n"
+
+        forced = runner.invoke(app, ["quickstart", "--dir", str(target), "--force"])
+        assert forced.exit_code == 0
+        assert "ansible.builtin.ping" in (target / "quickstart.yml").read_text()

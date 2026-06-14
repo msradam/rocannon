@@ -150,6 +150,19 @@ def build_inventory_list(inventory_paths: list[Path]) -> list[str]:
     return [str(p) for p in inventory_paths]
 
 
+def _redact_stream(value: Any) -> str:
+    """Redact a stdout/stderr field, coercing to text first.
+
+    Some modules (e.g. network modules like arista.eos.eos_command) return
+    ``stdout`` as a list of per-command outputs rather than a string.
+    """
+    if isinstance(value, list):
+        value = "\n".join(str(v) for v in value)
+    elif not isinstance(value, str):
+        value = str(value)
+    return redact_text(value)
+
+
 def _parse_runner_result(runner: Any) -> dict[str, Any]:
     """Extract structured results from ansible-runner events.
 
@@ -166,8 +179,8 @@ def _parse_runner_result(runner: Any) -> dict[str, Any]:
             host_results[host] = {
                 "changed": res.get("changed", False),
                 "result": redact(res),
-                "stdout": redact_text(res.get("stdout", "")),
-                "stderr": redact_text(res.get("stderr", "")),
+                "stdout": _redact_stream(res.get("stdout", "")),
+                "stderr": _redact_stream(res.get("stderr", "")),
             }
 
     if not host_results:

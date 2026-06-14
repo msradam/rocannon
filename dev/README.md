@@ -8,7 +8,7 @@ It is not part of the shippable Rocannon package.
 ```
 dev/
 ├── inventories/
-│   ├── csrt.yml              # IBM CSRT lab z/OS LPARs (cb8a–cb89)
+│   ├── csrt.yml              # IBM CSRT lab z/OS LPARs (cb8a-cb89)
 │   ├── vsi.yml               # Wazi as a Service cloud z/OS instance
 │   ├── ibmcloud_info.yml     # IBM Cloud credentials (gitignored, never commit)
 │   └── host_vars/

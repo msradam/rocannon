@@ -12,10 +12,10 @@ Then:
 
 import asyncio
 import json
+import sys
 from pathlib import Path
 
 from claude_agent_sdk import (
-    AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKClient,
     TextBlock,
@@ -31,20 +31,50 @@ PROMPTS = [
 ]
 
 
+_TTY = sys.stdout.isatty()
+
+
+def _c(code: str, text: str) -> str:
+    return f"\033[{code}m{text}\033[0m" if _TTY else text
+
+
 def _result_text(content: object) -> str:
     if isinstance(content, list):
         return " ".join(b.get("text", "") for b in content if isinstance(b, dict))
     return str(content)
 
 
+def _fmt_value(value: object) -> str:
+    return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+
+
+def _fmt_args(args: dict[str, object]) -> str:
+    return "  ".join(f"{k}={_fmt_value(v)}" for k, v in args.items())
+
+
+def _summarize_result(content: object) -> str:
+    text = _result_text(content)
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return text.replace("\n", " ")[:160]
+    if isinstance(data, dict) and "status" in data:
+        bits = [f"status={data.get('status')}"]
+        if data.get("changed") is not None:
+            bits.append(f"changed={data.get('changed')}")
+        return "  ".join(bits)
+    return text.replace("\n", " ")[:160]
+
+
 def _render(message: object) -> None:
     for block in getattr(message, "content", []) or []:
         if isinstance(block, TextBlock) and block.text.strip():
-            print(f"  haiku: {block.text.strip()}")
+            print(f"  {_c('36', 'claude')}  {block.text.strip()}")
         elif isinstance(block, ToolUseBlock):
-            print(f"  -> calls {block.name}  {json.dumps(block.input)}")
+            name = _c("1", block.name.removeprefix("mcp__rocannon__"))
+            print(f"  {_c('33', '→')} {name}  {_c('2', _fmt_args(block.input))}")
         elif isinstance(block, ToolResultBlock):
-            print(f"     result: {_result_text(block.content).replace(chr(10), ' ')[:200]}")
+            print(f"    {_c('2', '↳ ' + _summarize_result(block.content))}")
 
 
 async def main() -> None:
@@ -53,9 +83,22 @@ async def main() -> None:
         permission_mode="acceptEdits",
         allowed_tools=["mcp__rocannon__*"],
         disallowed_tools=[
-            "Task", "Bash", "BashOutput", "KillShell", "Read", "Edit", "Write",
-            "NotebookEdit", "Glob", "Grep", "WebSearch", "WebFetch", "TodoWrite",
-            "ToolSearch", "Skill", "ExitPlanMode",
+            "Task",
+            "Bash",
+            "BashOutput",
+            "KillShell",
+            "Read",
+            "Edit",
+            "Write",
+            "NotebookEdit",
+            "Glob",
+            "Grep",
+            "WebSearch",
+            "WebFetch",
+            "TodoWrite",
+            "ToolSearch",
+            "Skill",
+            "ExitPlanMode",
         ],
         setting_sources=[],
         mcp_servers={
@@ -63,10 +106,17 @@ async def main() -> None:
                 "type": "stdio",
                 "command": "docker",
                 "args": [
-                    "run", "-i", "--rm",
-                    "-v", f"{EE_DIR}:/cfg",
+                    "run",
+                    "-i",
+                    "--rm",
+                    "-v",
+                    f"{EE_DIR}:/cfg",
                     "rocannon-ee:demo",
-                    "rocannon", "mcp", "serve", "--profile", "/cfg/profile-agent.yml",
+                    "rocannon",
+                    "mcp",
+                    "serve",
+                    "--profile",
+                    "/cfg/profile-agent.yml",
                 ],
             }
         },
@@ -75,6 +125,7 @@ async def main() -> None:
         # The first query spawns and connects the MCP server (a `docker run`
         # here), which lags; drain a throwaway turn so the real prompts see the
         # tools.
+        print("connecting to the Rocannon MCP server...")
         await client.query("Which host can you manage?")
         async for _ in client.receive_response():
             pass

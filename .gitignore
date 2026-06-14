@@ -22,3 +22,10 @@ examples/execution-environment/context/
 .coverage
 .pytest_cache/
 dev/three_cannon_demo/_work/
+
+# Proprietary network OS images (vendor-licensed, never commit)
+cEOS*.tar*
+*.tar.xz
+
+# Local working notes
+handoff.md

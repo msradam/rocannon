@@ -1,15 +1,22 @@
-"""Drive Rocannon's MCP tools from natural language with Claude Haiku.
+"""Drive Rocannon against a containerlab network fabric, in natural language.
 
-Uses the Claude Agent SDK against the logged-in Claude Code session (no API
-key). Haiku is given plain-English tasks and a Rocannon MCP server; it picks
-the right Ansible module, calls it against the real host, and answers.
+Claude Haiku (via the Claude Agent SDK, reusing the logged-in Claude Code
+session) is given plain-English tasks and a Rocannon MCP server whose tools are
+the arista.eos modules. It gathers device state, inspects topology, and pushes a
+config change against real Arista cEOS nodes running under containerlab.
+
+Rocannon runs wherever the lab's management network is reachable. By default it
+is launched locally (the usual case: containerlab and the agent on the same
+Linux host). Set ROCANNON_SSH=user@host to run it over SSH on a remote lab host
+instead.
 
 Usage:
-    uv run python examples/case-study/agent_demo.py [profile.yml]
+    uv run python examples/containerlab/agent_demo.py [profile.yml]
 """
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -22,14 +29,29 @@ from claude_agent_sdk import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILE = sys.argv[1] if len(sys.argv) > 1 else "/tmp/rocannon-demo-env/profile-agent.yml"  # noqa: S108
+PROFILE = sys.argv[1] if len(sys.argv) > 1 else str(Path(__file__).parent / "ceos-profile.yml")
 
 PROMPTS = [
-    "What OS and version is host ubi9 running?",
-    "Run 'uptime' on host ubi9 and report the load averages.",
-    "Set the message of the day on host ubi9 to exactly 'Managed by Rocannon',"
+    "What model and EOS software version is ceos1 running?",
+    "What is ceos1 directly connected to? Look at its LLDP neighbors.",
+    "Set the login banner on ceos1 to exactly 'Managed by Rocannon'"
     " and tell me whether it changed anything.",
 ]
+
+
+def _mcp_server() -> dict:
+    remote = os.environ.get("ROCANNON_SSH")
+    if remote:
+        serve = os.environ.get(
+            "ROCANNON_SSH_CMD",
+            f"cd {ROOT} && uv run rocannon mcp serve --profile {PROFILE}",
+        )
+        return {"type": "stdio", "command": "ssh", "args": ["-T", remote, serve]}
+    return {
+        "type": "stdio",
+        "command": "uv",
+        "args": ["run", "--directory", str(ROOT), "rocannon", "mcp", "serve", "--profile", PROFILE],
+    }
 
 
 _TTY = sys.stdout.isatty()
@@ -104,28 +126,13 @@ async def main() -> None:
             "ExitPlanMode",
         ],
         setting_sources=[],
-        mcp_servers={
-            "rocannon": {
-                "type": "stdio",
-                "command": "uv",
-                "args": [
-                    "run",
-                    "--directory",
-                    str(ROOT),
-                    "rocannon",
-                    "mcp",
-                    "serve",
-                    "--profile",
-                    PROFILE,
-                ],
-            }
-        },
+        mcp_servers={"rocannon": _mcp_server()},
     )
     async with ClaudeSDKClient(options=options) as client:
         # The first query spawns and connects the MCP server, which lags; drain
         # a throwaway turn so the real prompts see the tools.
         print("connecting to the Rocannon MCP server...")
-        await client.query("Which host can you manage?")
+        await client.query("Which hosts can you manage?")
         async for _ in client.receive_response():
             pass
         for prompt in PROMPTS:

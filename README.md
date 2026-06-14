@@ -4,11 +4,13 @@
   <img src="https://raw.githubusercontent.com/msradam/rocannon/main/docs/assets/gryphon.svg" alt="" width="120">
 </p>
 
-Rocannon is an MCP server that registers every installed Ansible module as a
-typed tool. It reads `ansible-doc -j` for each module at startup and builds a
-Pydantic-validated function signature, then exposes the result over the MCP
-protocol (stdio or HTTP). Any MCP client (Claude Code, Cursor, mcphost,
-custom agents) calls the same tools an operator would call from a REPL.
+Rocannon turns any Ansible control node into an MCP server: it registers every
+installed module as a typed tool. It reads `ansible-doc -j` for each module at
+startup and builds a Pydantic-validated function signature, then exposes the
+result over the MCP protocol (stdio or HTTP). The tool surface is whatever you
+have installed, from one collection to a hundred. Any MCP client (Claude Code,
+Cursor, mcphost, custom agents) calls the same tools an operator would call from
+a REPL.
 
 Each registered tool carries the module's own `ansible-doc` metadata: a JSON
 output schema for structured results, and MCP safety hints derived from the
@@ -35,11 +37,20 @@ Sessions driven via the MCP server save the same way: as Ansible playbooks
 under `.rocannon/playbooks/`. Rocannon also loads them back on next startup
 as MCP prompts.
 
-![demo](https://raw.githubusercontent.com/msradam/rocannon/main/docs/assets/demo.gif)
+![demo](https://raw.githubusercontent.com/msradam/rocannon/main/docs/assets/demo-agent.gif)
 
-For a worked example against a real RHEL 9 host (collection reflection, real
-execution over SSH, `--check` dry-run, and replay as standard `ansible-playbook`),
-see [`examples/case-study`](examples/case-study/).
+Claude Haiku, via the Claude Agent SDK, driving Rocannon's typed Ansible-module
+tools against a real RHEL 9 host in natural language.
+
+### Case studies
+
+- [`examples/case-study`](examples/case-study/) drives natural language into
+  ad-hoc Ansible on a real RHEL 9 host: facts, a command, a config change, plus
+  `--check` and replay as standard `ansible-playbook`.
+- [`examples/containerlab`](examples/containerlab/) runs the same agent against a
+  two-node Arista cEOS fabric, where the `arista.eos` modules become MCP tools.
+- [`examples/execution-environment`](examples/execution-environment/) bakes
+  Rocannon into an Ansible Execution Environment for a frozen, reproducible tool set.
 
 ## Install
 
@@ -52,12 +63,21 @@ anything missing from the environment.
 
 ## Quickstart
 
-The quickstart profile targets `localhost` with `ansible_connection=local`.
+```bash
+rocannon quickstart
+```
+
+This scaffolds a `localhost` profile (`ansible_connection=local`) under
+`.rocannon/` and prints the exact wiring for your MCP client (Claude Code,
+Claude Desktop, Cursor) plus a `rocannon mcp doctor` command to confirm the
+tools register. Then ask your assistant something like *"Gather facts from
+localhost and tell me the OS and kernel version."*
+
+To explore from a shell instead of an MCP client:
 
 ```bash
-cd examples/quickstart
-rocannon mcp doctor --profile profile.yml   # list registered tools
-rocannon repl       --profile profile.yml   # operator shell
+rocannon mcp doctor --profile .rocannon/quickstart.yml   # list registered tools
+rocannon repl       --profile .rocannon/quickstart.yml   # operator shell
 ```
 
 Inside the REPL:
@@ -77,6 +97,7 @@ let Rocannon load it back as an MCP prompt next time the server starts.
 ## CLI
 
 ```
+rocannon quickstart    scaffold a localhost profile and print client wiring
 rocannon <fqcn>        invoke a module: rocannon ansible.builtin.copy ...
                        optional --record FILE appends each call to a playbook
 rocannon mcp serve     start the MCP server (stdio or http)

@@ -1,0 +1,7 @@
+inventories:
+  - ./ceos-inventory.yml
+modules:
+  - arista.eos.eos_facts
+  - arista.eos.eos_command
+  - arista.eos.eos_config
+  - arista.eos.eos_banner

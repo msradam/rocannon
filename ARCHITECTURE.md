@@ -109,9 +109,10 @@ a `target` parameter (the inventory host or group pattern).
   collections with hundreds of modules this dominates startup time.
   Loading specific modules instead of whole collections is the fastest path.
 - Some module parameters have names that collide with Python keywords (`if`,
-  `from`) or with reserved slots (`target`). The registration layer mangles
-  those on the way in via `_sanitize_param_name` and de-mangles on the way
-  out.
+  `from`) or with reserved slots (`target`, `type`). The registration layer
+  mangles those on the way in via `_sanitize_param_name` (e.g. `type` becomes
+  `param_type`) and de-mangles on the way out. The mangled name is what shows
+  in the tool's MCP schema, so callers and models see and pass `param_type`.
 
 **Resources.** The Ansible layer also registers
 `rocannon://inventory` (active profile's hosts + groups) and

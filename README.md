@@ -20,9 +20,12 @@ module's attributes (read-only for fact modules, destructive and open-world for
 Every module is also a top-level CLI subcommand:
 
 ```
-rocannon ansible.builtin.command --target h1 --cmd 'uptime'
-rocannon ansible.builtin.copy    --target h1 --src /etc/hosts --dest /tmp/h
+rocannon ansible.builtin.command --target h1 -i hosts --cmd 'uptime'
+rocannon ansible.builtin.copy    --target h1 -i hosts --src /etc/hosts --dest /tmp/h
 ```
+
+Each invocation needs an inventory: pass `-i/--inventory`, `--profile <name|path>`,
+or run from a directory with a discovered `.rocannon/profiles/`.
 
 Append `--record path/to/runbook.yml` to any invocation and Rocannon writes
 each call as a new play in a real Ansible playbook. The resulting file runs
@@ -105,9 +108,9 @@ rocannon mcp doctor    list registered tools, resources, prompts
 rocannon repl          interactive shell on the same MCP server
 rocannon run           legacy ad-hoc form (module FQCN + -a key=value)
 rocannon doctor        system health (binaries, env, inventory)
-rocannon doc <module>  print parsed schema for a module
+rocannon doc <module>  print parsed schema for a module (no profile needed)
 rocannon search <q>    find modules by name or description
-rocannon ls            list hosts/groups/modules from a profile
+rocannon ls <kind>     list hosts, groups, or modules from a profile
 rocannon playbook      list/show/run saved playbooks
 ```
 
@@ -132,7 +135,22 @@ extra_envvars:                      # optional
 ```
 
 `modules` accepts a specific module (`ansible.builtin.copy`), a collection
-(`ansible.builtin`), or a namespace (`community`).
+(`ansible.builtin`), or a namespace (`community`). Only Ansible modules become
+tools; filter, lookup, and other plugin types are skipped. Listing specific
+modules is much faster to start than a whole large collection, since each module
+costs an `ansible-doc` call at startup.
+
+Modules with third-party Python dependencies (for example `community.crypto`
+needs `cryptography`, `community.docker` needs the `docker` SDK, `network_cli`
+connections need `paramiko` or `ansible-pylibssh`) require those installed in
+the same environment as Rocannon. The scaffolded quickstart inventory pins
+`ansible_python_interpreter` to that environment so localhost runs use it; set
+the same for other hosts if their modules need extra libraries.
+
+Process environment variables do not carry into a local-connection task, so
+connection details have to be passed as module arguments. For example
+`community.docker` on a non-default socket (Colima, OrbStack, rootless Podman)
+needs the socket as the module's `docker_host` argument, not `DOCKER_HOST`.
 
 Multiple profiles can live under `.rocannon/profiles/`:
 

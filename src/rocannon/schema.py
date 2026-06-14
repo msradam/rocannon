@@ -66,6 +66,9 @@ def expand_modules(specs: list[str]) -> list[str]:
 
 def fetch_module_schema(module_name: str) -> dict[str, Any]:
     """Fetch and parse ansible-doc JSON for a single module."""
+    from rocannon.executor import ensure_ansible_on_path
+
+    ensure_ansible_on_path()
     result = subprocess.run(
         ["ansible-doc", "-t", "module", "-j", module_name],
         capture_output=True,

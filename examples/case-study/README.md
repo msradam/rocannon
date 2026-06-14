@@ -84,7 +84,9 @@ of Rocannon.
 ## Reproduce
 
 Needs docker, the `ansible` extra, the posix collection, and a logged-in
-`claude` CLI (the Agent SDK reuses that session):
+`claude` CLI (the Agent SDK reuses that session). Run it from a normal shell,
+not from inside an active Claude Code session, so the demo's own MCP server is
+the one Haiku uses (a nested session inherits the parent's servers instead):
 
 ```bash
 ansible-galaxy collection install ansible.posix

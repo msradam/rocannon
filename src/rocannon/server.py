@@ -184,6 +184,9 @@ def create_server(
     registry) or a ``ProfileRegistry`` from ``profiles.load_profile_registry``.
     """
     from rocannon.ansible import register_ansible_modules
+    from rocannon.executor import ensure_ansible_on_path
+
+    ensure_ansible_on_path()
 
     if isinstance(config_or_registry, Config):
         registry = single_profile_registry(config_or_registry)

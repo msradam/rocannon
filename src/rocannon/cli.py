@@ -17,6 +17,7 @@ import typer
 from rocannon.config import Config, load_profile
 from rocannon.correlation import CorrelationFormatter
 from rocannon.executor import (
+    ensure_ansible_on_path,
     resolve_idle_timeout,
     resolve_timeout,
     run_module,
@@ -42,8 +43,8 @@ app = typer.Typer(
     help=(
         "Rocannon: every installed Ansible module as a typed MCP tool and CLI.\n\n"
         "Invoke a module directly with its FQCN:\n"
-        "  rocannon ansible.builtin.command --target h1 --cmd 'uptime'\n"
-        "  rocannon ansible.builtin.copy --target h1 --src /foo --dest /bar\n"
+        "  rocannon ansible.builtin.command --target h1 -i hosts --cmd 'uptime'\n"
+        "  rocannon ansible.builtin.copy --target h1 -i hosts --src /foo --dest /bar\n"
         "Append --record <file.yml> to write each call into a real Ansible playbook."
     ),
     no_args_is_help=True,
@@ -51,9 +52,23 @@ app = typer.Typer(
 )
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(_pkg_version("rocannon"))
+        raise typer.Exit()
+
+
 @app.callback()
-def _root() -> None:
+def _root(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version", callback=_version_callback, is_eager=True, help="Show version and exit."
+        ),
+    ] = False,
+) -> None:
     """Rocannon: every Ansible module as a typed MCP tool and CLI."""
+    ensure_ansible_on_path()
 
 
 class Transport(StrEnum):
@@ -304,7 +319,13 @@ def mcp_doctor(
 # `quickstart`, scaffold a localhost profile and print client wiring
 # ---------------------------------------------------------------------------
 
-_QUICKSTART_INVENTORY = "[local]\nlocalhost ansible_connection=local\n"
+_QUICKSTART_INVENTORY = (
+    "[local]\n"
+    # Pin localhost to the interpreter rocannon runs under, so modules execute
+    # in the same environment where their Python dependencies are installed.
+    "localhost ansible_connection=local "
+    'ansible_python_interpreter="{{ ansible_playbook_python }}"\n'
+)
 
 _QUICKSTART_PROFILE = """\
 # Rocannon quickstart profile. Targets localhost via the local connection.
@@ -1199,6 +1220,7 @@ def _dispatch_module(fqcn: str, argv: list[str]) -> None:
 
 def main() -> None:
     """CLI entrypoint."""
+    ensure_ansible_on_path()
     # `rocannon <fqcn> ...` bypasses Typer and dispatches the module directly.
     # FQCNs always contain a dot and aren't flags, so they're trivially
     # distinguishable from subcommand names (mcp, doctor, repl, run, ...).

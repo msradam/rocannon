@@ -1,5 +1,6 @@
 import contextlib
 import os
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,22 @@ import ansible_runner
 import yaml
 
 from rocannon.redaction import redact, redact_text
+
+
+def ensure_ansible_on_path() -> None:
+    """Put this interpreter's script directory on PATH.
+
+    Rocannon shells out to ansible-doc, ansible-inventory, and ansible-playbook
+    (via ansible-runner). When rocannon is launched by absolute path, as MCP
+    clients do, with its venv not on PATH, those siblings are not found even
+    though they sit next to the running interpreter. Prepend the interpreter's
+    bin directory so subprocess lookups resolve them.
+    """
+    bin_dir = str(Path(sys.executable).parent)
+    parts = os.environ.get("PATH", "").split(os.pathsep)
+    if bin_dir not in parts:
+        os.environ["PATH"] = os.pathsep.join([bin_dir, *parts])
+
 
 DEFAULT_TIMEOUT = 300
 DEFAULT_IDLE_TIMEOUT = 60

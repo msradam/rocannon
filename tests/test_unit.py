@@ -542,6 +542,20 @@ class TestParseRunnerResult:
         assert "hosts" not in result
         assert result["changed"] is False
 
+    def test_ensure_ansible_on_path_prepends_interpreter_dir(self) -> None:
+        import os
+        import sys
+
+        from rocannon.executor import ensure_ansible_on_path
+
+        bin_dir = str(Path(sys.executable).parent)
+        with patch.dict(os.environ, {"PATH": "/usr/bin"}, clear=False):
+            ensure_ansible_on_path()
+            assert os.environ["PATH"].split(os.pathsep)[0] == bin_dir
+            # Idempotent: a second call does not duplicate the entry.
+            ensure_ansible_on_path()
+            assert os.environ["PATH"].split(os.pathsep).count(bin_dir) == 1
+
     def test_list_stdout_coerced_to_text(self) -> None:
         # Network modules (e.g. arista.eos.eos_command) return stdout as a list
         # of per-command outputs; it must not crash redaction.
@@ -1438,6 +1452,8 @@ class TestQuickstart:
         assert profile.exists()
         assert inventory.exists()
         assert "ansible_connection=local" in inventory.read_text()
+        # Pin the interpreter so modules with deps run in rocannon's own env.
+        assert "ansible_python_interpreter" in inventory.read_text()
         assert "ansible.builtin.setup" in profile.read_text()
 
         # Wiring is printed for both Claude Code and a generic client config.

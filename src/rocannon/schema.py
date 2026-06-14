@@ -96,6 +96,62 @@ def fetch_module_schema(module_name: str) -> dict[str, Any]:
     return _parse_module_doc(module_name, doc[module_name])
 
 
+# ansible-doc pays ~0.2s of Python/Ansible import startup per invocation, which
+# dominates schema loading. It accepts many module names per call and returns a
+# JSON object keyed by name, so batching amortizes that startup across the whole
+# set. Chunk to keep the argument list well under OS limits for huge collections.
+_DOC_BATCH_SIZE = 256
+
+
+def _fetch_individually(names: list[str], into: dict[str, dict[str, Any]]) -> None:
+    for name in names:
+        try:
+            into[name] = fetch_module_schema(name)
+        except SchemaFetchError as exc:
+            logger.warning("Skipping %s: %s", name, exc)
+
+
+def fetch_module_schemas(module_names: list[str]) -> dict[str, dict[str, Any]]:
+    """Fetch and parse ansible-doc JSON for many modules in one pass per chunk.
+
+    Returns a mapping of module name to parsed schema. Names absent from
+    ansible-doc's output (renamed, not actually a module) are omitted; the
+    caller decides what a missing schema means. Falls back to per-module fetches
+    for any chunk whose batched call fails, so one unusable module never blocks
+    the rest.
+    """
+    names = list(dict.fromkeys(module_names))  # de-dup, preserve order
+    if not names:
+        return {}
+
+    from rocannon.executor import ensure_ansible_on_path
+
+    ensure_ansible_on_path()
+    schemas: dict[str, dict[str, Any]] = {}
+    for i in range(0, len(names), _DOC_BATCH_SIZE):
+        chunk = names[i : i + _DOC_BATCH_SIZE]
+        result = subprocess.run(
+            ["ansible-doc", "-t", "module", "-j", *chunk],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            logger.warning("Batched ansible-doc failed for %d modules; retrying singly", len(chunk))
+            _fetch_individually(chunk, schemas)
+            continue
+        try:
+            doc = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            logger.warning("Unparsable batched ansible-doc output; retrying %d singly", len(chunk))
+            _fetch_individually(chunk, schemas)
+            continue
+        for name in chunk:
+            entry = doc.get(name)
+            if entry is not None:
+                schemas[name] = _parse_module_doc(name, entry)
+    return schemas
+
+
 def _parse_module_doc(module_name: str, module_doc: dict[str, Any]) -> dict[str, Any]:
     """Convert ansible-doc output into a structured schema dict."""
     doc_entry = module_doc.get("doc", {})
@@ -114,7 +170,34 @@ def _parse_module_doc(module_name: str, module_doc: dict[str, Any]) -> dict[str,
         "description": _flatten_description(description),
         "parameters": parameters,
         "attributes": _parse_attributes(doc_entry.get("attributes") or {}),
+        "meta": _build_meta(module_doc, doc_entry),
     }
+
+
+def _build_meta(module_doc: dict[str, Any], doc_entry: dict[str, Any]) -> dict[str, Any]:
+    """Pass through the descriptive metadata ansible-doc already provides.
+
+    None of this drives execution; it travels in the tool's MCP ``meta`` so a
+    client or model can see a module's Python requirements, when it was added,
+    whether it is deprecated, related modules, and the documented return keys.
+    """
+    meta: dict[str, Any] = {}
+    requirements = doc_entry.get("requirements")
+    if requirements:
+        meta["requirements"] = requirements
+    version_added = doc_entry.get("version_added")
+    if version_added and version_added != "historical":
+        meta["version_added"] = str(version_added)
+    if doc_entry.get("deprecated"):
+        meta["deprecated"] = True
+    seealso = doc_entry.get("seealso") or []
+    related = [s["module"] for s in seealso if isinstance(s, dict) and s.get("module")]
+    if related:
+        meta["seealso"] = related
+    return_block = module_doc.get("return")
+    if isinstance(return_block, dict) and return_block:
+        meta["returns"] = sorted(return_block)
+    return meta
 
 
 def _parse_attributes(attributes: dict[str, Any]) -> dict[str, Any]:

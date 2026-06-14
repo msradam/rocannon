@@ -38,6 +38,7 @@ from rocannon.schema import (
     _parse_attributes,
     expand_modules,
     fetch_module_schema,
+    fetch_module_schemas,
 )
 
 # ---------------------------------------------------------------------------
@@ -322,6 +323,89 @@ class TestFetchModuleSchema:
             pytest.raises(SchemaFetchError, match="empty output"),
         ):
             fetch_module_schema("ansible.builtin.ping")
+
+    def test_meta_carries_ansible_doc_fields(self) -> None:
+        doc = {
+            "x.y.z": {
+                "doc": {
+                    "short_description": "Z",
+                    "options": {},
+                    "requirements": ["lib >= 1.0"],
+                    "version_added": "2.5.0",
+                    "deprecated": {"why": "old"},
+                    "seealso": [{"module": "x.y.other"}, {"ref": "g", "description": "d"}],
+                },
+                "return": {"path": {}, "changed": {}},
+            }
+        }
+        completed = MagicMock()
+        completed.returncode = 0
+        completed.stdout = json.dumps(doc)
+        with patch("rocannon.schema.subprocess.run", return_value=completed):
+            meta = fetch_module_schema("x.y.z")["meta"]
+        assert meta["requirements"] == ["lib >= 1.0"]
+        assert meta["version_added"] == "2.5.0"
+        assert meta["deprecated"] is True
+        assert meta["seealso"] == ["x.y.other"]  # ref-only entries dropped
+        assert set(meta["returns"]) == {"path", "changed"}
+
+    def test_meta_omits_absent_and_historical_fields(self) -> None:
+        doc = {
+            "x.y.z": {
+                "doc": {"short_description": "Z", "options": {}, "version_added": "historical"}
+            }
+        }
+        completed = MagicMock()
+        completed.returncode = 0
+        completed.stdout = json.dumps(doc)
+        with patch("rocannon.schema.subprocess.run", return_value=completed):
+            meta = fetch_module_schema("x.y.z")["meta"]
+        assert meta == {}
+
+
+class TestToolTags:
+    def test_tags_include_collection_and_namespace(self) -> None:
+        from rocannon.ansible import _tags_for
+
+        assert _tags_for("ansible.builtin.copy") == {"ansible.builtin", "ansible"}
+        assert _tags_for("community.crypto.openssl_privatekey") == {"community.crypto", "community"}
+
+
+class TestFetchModuleSchemas:
+    _DOC = {
+        "ansible.builtin.ping": {"doc": {"short_description": "Ping", "options": {}}},
+        "ansible.builtin.copy": {
+            "doc": {
+                "short_description": "Copy files",
+                "options": {"dest": {"type": "str", "required": True}},
+            }
+        },
+    }
+
+    def test_batches_all_modules_in_one_call(self) -> None:
+        completed = MagicMock()
+        completed.returncode = 0
+        completed.stdout = json.dumps(self._DOC)
+        with patch("rocannon.schema.subprocess.run", return_value=completed) as run:
+            schemas = fetch_module_schemas(["ansible.builtin.ping", "ansible.builtin.copy"])
+        # One subprocess for both modules, not one per module.
+        assert run.call_count == 1
+        assert set(schemas) == {"ansible.builtin.ping", "ansible.builtin.copy"}
+        assert schemas["ansible.builtin.copy"]["parameters"][0]["name"] == "dest"
+
+    def test_missing_module_is_omitted_not_raised(self) -> None:
+        completed = MagicMock()
+        completed.returncode = 0
+        completed.stdout = json.dumps(self._DOC)  # no entry for the bad name
+        with patch("rocannon.schema.subprocess.run", return_value=completed):
+            schemas = fetch_module_schemas(["ansible.builtin.ping", "bad.module.nope"])
+        assert "ansible.builtin.ping" in schemas
+        assert "bad.module.nope" not in schemas
+
+    def test_empty_input_makes_no_call(self) -> None:
+        with patch("rocannon.schema.subprocess.run") as run:
+            assert fetch_module_schemas([]) == {}
+        run.assert_not_called()
 
     def test_required_parameter_flagged(self) -> None:
         doc = {

@@ -26,7 +26,7 @@ from rocannon.correlation import get_call_metadata
 from rocannon.executor import build_envvars, build_inventory_list, run_module
 from rocannon.inventory import load_inventory
 from rocannon.redaction import redact
-from rocannon.schema import ANSIBLE_TYPE_MAP, expand_modules, fetch_module_schema
+from rocannon.schema import ANSIBLE_TYPE_MAP, expand_modules, fetch_module_schemas
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -93,9 +93,15 @@ def register_ansible_modules(
 
     report = AnsibleRegistration()
     schema_cache: dict[str, dict[str, Any]] = {}
-    for module_name in sorted(union_modules):
+    ordered = sorted(union_modules)
+    schemas = fetch_module_schemas(ordered)
+    for module_name in ordered:
+        schema = schemas.get(module_name)
+        if schema is None:
+            report.tools_failed.append(module_name)
+            logger.warning("Skipping %s: not present in ansible-doc output", module_name)
+            continue
         try:
-            schema = fetch_module_schema(module_name)
             _register_tool(mcp, module_name, schema, union_inv, runtime)
             schema_cache[module_name] = schema
             report.tools_registered += 1
@@ -247,6 +253,18 @@ def _collection_tag(module_name: str) -> str:
     return parts[0] if len(parts) > 1 else module_name
 
 
+def _tags_for(module_name: str) -> set[str]:
+    """Tag a tool by its collection and namespace, both derived from the FQCN.
+
+    'ansible.builtin.copy' -> {'ansible.builtin', 'ansible'}. Lets a client
+    filter the surface by collection or whole namespace.
+    """
+    tags = {_collection_tag(module_name)}
+    namespace = module_name.split(".", 1)[0]
+    tags.add(namespace)
+    return tags
+
+
 def _build_target_annotation(inv: dict[str, list[str]]) -> Any:
     """Build a typed annotation for the target parameter.
 
@@ -311,12 +329,14 @@ def _register_tool(
     """
     fn = _make_tool_fn(module_name, schema, inv, runtime)
 
+    module_meta = schema.get("meta") or {}
     mcp.tool(
         name=module_name,
         description=schema["description"],
-        tags={_collection_tag(module_name)},
+        tags=_tags_for(module_name),
         annotations=_build_annotations(module_name, schema.get("attributes", {})),
         output_schema=_RESULT_SCHEMA,
+        meta={"ansible": module_meta} if module_meta else None,
     )(fn)
 
 

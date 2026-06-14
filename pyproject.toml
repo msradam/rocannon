@@ -1,6 +1,6 @@
 [project]
 name = "rocannon"
-version = "0.1.2"
+version = "0.1.3"
 description = "Every Ansible module as a typed MCP tool"
 readme = "README.md"
 license = "MIT"
@@ -8,8 +8,20 @@ license-files = ["LICENSE", "NOTICE"]
 authors = [
     { name = "Adam Munawar Rahman", email = "msrahmanadam@gmail.com" }
 ]
-requires-python = ">=3.12"
-keywords = ["ansible", "mcp", "model-context-protocol", "automation", "ibm-z", "zos"]
+# Upper bound tracks ansible-core's actual supported interpreters; it declares
+# >=3.12 but does not yet run on 3.14. Capping steers installers to a working
+# Python instead of a broken one. Raise it when ansible-core supports 3.14.
+requires-python = ">=3.12,<3.14"
+keywords = [
+    "ansible",
+    "mcp",
+    "model-context-protocol",
+    "llm",
+    "ai-agents",
+    "devops",
+    "automation",
+    "infrastructure-as-code",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",

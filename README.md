@@ -15,7 +15,11 @@ a REPL.
 Each registered tool carries the module's own `ansible-doc` metadata: a JSON
 output schema for structured results, and MCP safety hints derived from the
 module's attributes (read-only for fact modules, destructive and open-world for
-`command`, `shell`, `script`, and `raw`).
+`command`, `shell`, `script`, and `raw`). Tools are tagged by collection and
+namespace (`ansible.builtin`, `ansible`) for client-side filtering, and their MCP
+`meta` carries the module's documented Python requirements, return keys, related
+modules, version added, and deprecation. Fields a module does not document are
+omitted.
 
 Every module is also a top-level CLI subcommand:
 
@@ -127,18 +131,17 @@ inventories:
   - ./hosts
 modules:
   - ansible.builtin
-  - ibm.ibm_zos_core
+  - community.docker
 ansible_cfg: ./ansible.cfg          # optional
 vault_password_file: ~/.vault_pass  # optional
 extra_envvars:                      # optional
-  ZOAU_HOME: /usr/lpp/IBM/zoautil
+  KUBECONFIG: ~/.kube/config
 ```
 
 `modules` accepts a specific module (`ansible.builtin.copy`), a collection
 (`ansible.builtin`), or a namespace (`community`). Only Ansible modules become
 tools; filter, lookup, and other plugin types are skipped. Listing specific
-modules is much faster to start than a whole large collection, since each module
-costs an `ansible-doc` call at startup.
+modules keeps the tool surface focused on what a task needs.
 
 Modules with third-party Python dependencies (for example `community.crypto`
 needs `cryptography`, `community.docker` needs the `docker` SDK, `network_cli`

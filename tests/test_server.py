@@ -1,7 +1,7 @@
 """End-to-end tests for the FastMCP server using an in-memory Client.
 
 These exercise tool registration, middleware composition, and tool invocation
-without touching ansible-doc or ansible-runner. ``fetch_module_schema`` and
+without touching ansible-doc or ansible-runner. ``fetch_module_schemas`` and
 ``run_module`` are mocked at the module boundary.
 """
 
@@ -74,10 +74,10 @@ def _build_server(inv: Path, modules: list[str]) -> Any:
         "ansible.builtin.command": COMMAND_SCHEMA,
     }
 
-    def _fetch(name: str) -> dict[str, Any]:
-        return schemas[name]
+    def _fetch(names: list[str]) -> dict[str, Any]:
+        return {n: schemas[n] for n in names if n in schemas}
 
-    with patch("rocannon.ansible.fetch_module_schema", side_effect=_fetch):
+    with patch("rocannon.ansible.fetch_module_schemas", side_effect=_fetch):
         cfg = Config(inventories=[inv], modules=modules)
         return create_server(cfg)
 
@@ -98,15 +98,14 @@ class TestServerToolRegistration:
         assert {"ansible.builtin.ping", "ansible.builtin.copy"} <= names
 
     async def test_skips_modules_whose_schema_fails(self, inventory_file: Path) -> None:
-        from rocannon.schema import SchemaFetchError
         from rocannon.server import create_server
 
-        def _fetch(name: str) -> dict[str, Any]:
-            if name == "broken.module.x":
-                raise SchemaFetchError("synthetic failure")
-            return PING_SCHEMA
+        def _fetch(names: list[str]) -> dict[str, Any]:
+            # A module whose schema can't be fetched is simply omitted from the
+            # batch result, exactly as a missing/unparsable module would be.
+            return {n: PING_SCHEMA for n in names if n != "broken.module.x"}
 
-        with patch("rocannon.ansible.fetch_module_schema", side_effect=_fetch):
+        with patch("rocannon.ansible.fetch_module_schemas", side_effect=_fetch):
             cfg = Config(
                 inventories=[inventory_file],
                 modules=["ansible.builtin.ping", "broken.module.x"],
@@ -147,7 +146,10 @@ class TestServerToolInvocation:
     async def test_per_module_timeout_passed_through(self, inventory_file: Path) -> None:
         from rocannon.server import create_server
 
-        with patch("rocannon.ansible.fetch_module_schema", return_value=PING_SCHEMA):
+        with patch(
+            "rocannon.ansible.fetch_module_schemas",
+            return_value={"ansible.builtin.ping": PING_SCHEMA},
+        ):
             cfg = Config(
                 inventories=[inventory_file],
                 modules=["ansible.builtin.ping"],

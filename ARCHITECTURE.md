@@ -102,12 +102,17 @@ types, required flags, choices, and descriptions.
 
 **What it exposes.** One tool per module. Tool name is the module's FQCN.
 Tool parameters mirror the module's documented parameters, with one addition:
-a `target` parameter (the inventory host or group pattern).
+a `target` parameter (the inventory host or group pattern). The tool is tagged
+with its collection and namespace, and its MCP `meta` carries the descriptive
+fields ansible-doc already provides (requirements, return keys, seealso,
+version_added, deprecation) under an `ansible` key. Anything the module does not
+document is omitted rather than emitted empty.
 
 **Quirks.**
-- ansible-doc is slow (around 300ms per module on a warm machine). For
-  collections with hundreds of modules this dominates startup time.
-  Loading specific modules instead of whole collections is the fastest path.
+- `register_ansible_modules` fetches all requested module schemas in a single
+  batched `ansible-doc -j <names...>` call (chunked for very large sets) via
+  `fetch_module_schemas`, then parses each into the typed schema. A name absent
+  from the output (renamed, or not actually a module) is skipped.
 - Some module parameters have names that collide with Python keywords (`if`,
   `from`) or with reserved slots (`target`, `type`). The registration layer
   mangles those on the way in via `_sanitize_param_name` (e.g. `type` becomes
@@ -348,8 +353,6 @@ strict, pytest. The same chain runs in `.github/workflows/ci.yml`.
 
 Things that surprised the author while building this:
 
-- **ansible-doc is slow.** Loading whole collections at startup adds seconds
-  to seconds-per-collection. Production setups should list specific modules.
 - **Small models generate tool calls as text.** Granite 3B occasionally
   emits `tool_name(arg=...)` as a string in its response instead of using
   the function-calling protocol. The natural fix is a larger model, but

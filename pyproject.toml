@@ -1,6 +1,6 @@
 [project]
 name = "rocannon"
-version = "0.1.0"
+version = "0.1.1"
 description = "Every Ansible module as a typed MCP tool"
 readme = "README.md"
 license = "MIT"
@@ -22,8 +22,13 @@ classifiers = [
     "Typing :: Typed",
 ]
 
-# Core framework only; Ansible is opt-in via the `ansible` extra.
+# rocannon reflects Ansible's module schema, so ansible-core and ansible-runner
+# are core dependencies. rocannon never imports ansible-core (GPL-3.0): it uses
+# the ansible-doc/ansible-inventory CLIs via subprocess and ansible-runner
+# (Apache-2.0) as a library.
 dependencies = [
+    "ansible-core>=2.21.0",
+    "ansible-runner>=2.4.3",
     "fastmcp>=3.4.2",
     "prompt_toolkit>=3.0.52",
     "typer>=0.26.7",
@@ -32,11 +37,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# `pip install 'rocannon[ansible]'` pulls in ansible-core + ansible-runner.
-ansible = [
-    "ansible-core>=2.21.0",
-    "ansible-runner>=2.4.3",
-]
+# Back-compat alias: Ansible is a core dependency now, but the 0.1.0 install
+# command `pip install 'rocannon[ansible]'` still resolves.
+ansible = []
 
 # --- AI ---
 # `pip install 'rocannon[ai]'` enables `.ai` mode in the REPL. Backend is
@@ -55,10 +58,8 @@ otel = [
 ]
 
 # --- Meta ---
-# `pip install 'rocannon[all]'`, everything.
+# `pip install 'rocannon[all]'`, every optional feature (Ansible is already core).
 all = [
-    "ansible-core>=2.21.0",
-    "ansible-runner>=2.4.3",
     "litellm>=1.89.0",
     "opentelemetry-sdk>=1.42.1",
     "opentelemetry-exporter-otlp>=1.42.1",
@@ -77,11 +78,9 @@ requires = ["uv_build>=0.11.14,<0.12.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-# `uv sync` installs these alongside the project. Includes the `ansible` extra's
-# Python deps so the test suite + lint can run against the full codebase.
+# `uv sync` installs these alongside the project. ansible-core and ansible-runner
+# come from the core dependencies.
 dev = [
-    "ansible-core>=2.21.0",
-    "ansible-runner>=2.4.3",
     "litellm>=1.89.0",
     "mypy>=2.1.0",
     "opentelemetry-sdk>=1.42.1",

@@ -183,17 +183,7 @@ def create_server(
     Accepts either a single ``Config`` (back-compat, wraps it as a one-entry
     registry) or a ``ProfileRegistry`` from ``profiles.load_profile_registry``.
     """
-    # ``rocannon.ansible`` imports ansible_runner via the executor. Convert
-    # an ImportError here into an install-hint message so users running the
-    # core package without ``[ansible]`` don't get a cryptic traceback.
-    try:
-        from rocannon.ansible import register_ansible_modules
-    except ImportError as exc:
-        raise RuntimeError(
-            "Rocannon requires the `ansible` extra: "
-            "`pip install 'rocannon[ansible]'` "
-            f"(import failed: {exc})"
-        ) from exc
+    from rocannon.ansible import register_ansible_modules
 
     if isinstance(config_or_registry, Config):
         registry = single_profile_registry(config_or_registry)

@@ -40,11 +40,11 @@ as MCP prompts.
 ## Install
 
 ```bash
-pip install 'rocannon[ansible]'
+pip install rocannon
 ```
 
-`ansible-doc` and `ansible-runner` must be on PATH. `rocannon doctor` reports
-anything missing.
+This brings ansible-core and ansible-runner with it. `rocannon doctor` reports
+anything missing from the environment.
 
 ## Quickstart
 

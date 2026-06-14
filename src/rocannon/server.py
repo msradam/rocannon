@@ -240,7 +240,7 @@ def create_server(
 
     @mcp.custom_route("/health", methods=["GET"])
     async def health(_request: Request) -> JSONResponse:
-        return JSONResponse({**health_payload, "active_profile": runtime.active_name})
+        return JSONResponse(health_payload | {"active_profile": runtime.active_name})
 
     return mcp
 
@@ -272,7 +272,7 @@ def _add_profile_tools(mcp: FastMCP, runtime: RuntimeContext) -> None:
                     "name": p.name,
                     "path": str(p.path),
                     "inventories": [str(i) for i in p.config.inventories],
-                    "modules": list(p.config.modules),
+                    "modules": p.config.modules.copy(),
                 }
                 for p in runtime.registry.profiles.values()
             ],
@@ -293,12 +293,12 @@ def _add_profile_tools(mcp: FastMCP, runtime: RuntimeContext) -> None:
             "name": active.name,
             "path": str(active.path),
             "inventories": [str(i) for i in cfg.inventories],
-            "modules": list(cfg.modules),
+            "modules": cfg.modules.copy(),
             "ansible_cfg": str(cfg.ansible_cfg) if cfg.ansible_cfg else None,
             "vault_password_file": (
                 str(cfg.vault_password_file) if cfg.vault_password_file else None
             ),
-            "extra_envvars": dict(cfg.extra_envvars),
+            "extra_envvars": cfg.extra_envvars.copy(),
         }
 
     @mcp.tool(
@@ -321,7 +321,7 @@ def _add_profile_tools(mcp: FastMCP, runtime: RuntimeContext) -> None:
             "active": active.name,
             "path": str(active.path),
             "inventories": [str(i) for i in active.config.inventories],
-            "modules": list(active.config.modules),
+            "modules": active.config.modules.copy(),
         }
 
 
@@ -343,7 +343,7 @@ def _add_discovery_resources(mcp: FastMCP, runtime: RuntimeContext) -> None:
                     "name": p.name,
                     "path": str(p.path),
                     "inventories": [str(i) for i in p.config.inventories],
-                    "modules": list(p.config.modules),
+                    "modules": p.config.modules.copy(),
                 }
                 for p in runtime.registry.profiles.values()
             ],
@@ -591,7 +591,7 @@ def _add_save_tools(
         if not successful:
             return {"ok": False, "error": "all candidate calls were meta-tools"}
 
-        steps = [PlaybookStep(tool=e.tool, args=dict(e.args)) for e in successful]
+        steps = [PlaybookStep(tool=e.tool, args=e.args.copy()) for e in successful]
         pb = Playbook(name=name, description=description, steps=steps)
         problems = validate_against_tools(pb, tool_names)
         if problems:

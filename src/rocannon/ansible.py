@@ -348,7 +348,7 @@ def _make_tool_fn(
     if inject_diff:
         reserved.add("diff")
     name_map: dict[str, str] = {}  # python_name → ansible_name
-    seen_names: set[str] = set(reserved)
+    seen_names: set[str] = reserved.copy()
 
     for p in params:
         ansible_name = p["name"]
@@ -441,7 +441,7 @@ def _make_tool_fn(
 
         meta = get_call_metadata()
         if meta is not None:
-            meta["args"] = redact({**module_args, "target": target})
+            meta["args"] = redact(module_args | {"target": target})
 
         if not runtime.is_module_active(module_name):
             err = {

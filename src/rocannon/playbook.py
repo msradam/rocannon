@@ -186,7 +186,7 @@ class Playbook:
         """Render the internal model as a list of Ansible plays."""
         plays: list[dict[str, Any]] = []
         for step in self.steps:
-            args = dict(step.args)
+            args = step.args.copy()
             target = str(args.pop("target", "all"))
             task: dict[str, Any] = {"name": step.tool, step.tool: args}
             plays.append(
@@ -205,7 +205,7 @@ class Playbook:
         body = yaml.safe_dump(plays, sort_keys=False, default_flow_style=False)
         header = [f"# Rocannon session: {self.name}"]
         if self.description:
-            for line in str(self.description).splitlines():
+            for line in self.description.splitlines():
                 header.append(f"# {line}" if line else "#")
         header.append("")
         return "\n".join(header) + "\n" + body

@@ -371,7 +371,7 @@ class TestFetchModuleSchema:
         assert state_param["choices"] == ["file", "directory", "absent", "touch", "link"]
 
     def test_type_map_coverage(self) -> None:
-        for ansible_type in ["str", "int", "bool", "list", "dict", "path", "raw"]:
+        for ansible_type in ("str", "int", "bool", "list", "dict", "path", "raw"):
             assert ansible_type in ANSIBLE_TYPE_MAP
 
     def test_attributes_extracted_from_doc(self) -> None:

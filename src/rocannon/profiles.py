@@ -56,7 +56,7 @@ def discover_profiles_dir(start: Path | None = None) -> Path | None:
     Falls back to `~/.rocannon/profiles/` if found. Returns None if neither exists.
     """
     cwd = (start or Path.cwd()).resolve()
-    for parent in [cwd, *cwd.parents]:
+    for parent in (cwd, *cwd.parents):
         candidate = parent / ".rocannon" / "profiles"
         if candidate.is_dir():
             return candidate

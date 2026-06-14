@@ -144,6 +144,19 @@ quote-style = "double"
 [tool.vulture]
 min_confidence = 80
 
+# --- Refurb ---
+# Adopted: FURB123 (.copy()), FURB173 (dict |), FURB144 (pathlib), FURB109 (tuple).
+# Declined, with reasons:
+# FURB143: `x or default` is an intentional guard on str|None ansible-doc values;
+#          removing it reintroduces None.
+# FURB138: false positive on loops that `try/except: continue` (load_all_playbooks).
+# FURB115: `x == []` is a stronger assertion than `not x` in tests (exact value).
+# FURB113: `extend((...))` reads worse than consecutive appends for multi-line strings.
+# FURB118: an explicit `lambda` is clearer than importing operator.itemgetter.
+# FURB184: explicit intermediate variables read better than fluid call chains.
+[tool.refurb]
+ignore = [143, 138, 115, 113, 118, 184]
+
 # --- Mypy ---
 [tool.mypy]
 python_version = "3.12"

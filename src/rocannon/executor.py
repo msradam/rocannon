@@ -137,7 +137,7 @@ def run_module(
         }
     finally:
         with contextlib.suppress(Exception):
-            os.unlink(playbook_path)
+            Path(playbook_path).unlink()
 
     result = _parse_runner_result(runner)
     if check:
@@ -198,7 +198,7 @@ def _parse_runner_result(runner: Any) -> dict[str, Any]:
 
     if len(host_results) == 1:
         host_data = next(iter(host_results.values()))
-        return {"status": status, **host_data}
+        return {"status": status} | host_data
 
     return {
         "status": status,

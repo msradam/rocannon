@@ -56,7 +56,7 @@ def expand_modules(specs: list[str]) -> list[str]:
         logger.error("ansible-doc --list failed: %s, returning explicit modules only", exc)
         return explicit
 
-    expanded: list[str] = list(explicit)
+    expanded: list[str] = explicit.copy()
     for prefix in prefixes:
         matched = [name for name in all_modules if name.startswith(prefix + ".")]
         expanded.extend(matched)

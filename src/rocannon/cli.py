@@ -892,7 +892,7 @@ def _append_to_record(path: Path, fqcn: str, target: str, module_args: dict[str,
     ``Playbook.to_ansible_yaml`` produces, so the resulting file can be run
     directly with ``ansible-playbook -i <inv> <file>``.
     """
-    step = PlaybookStep(tool=fqcn, args={**module_args, "target": target})
+    step = PlaybookStep(tool=fqcn, args=module_args | {"target": target})
 
     if path.exists():
         pb = load_playbook(path)

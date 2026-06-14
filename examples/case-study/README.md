@@ -1,151 +1,94 @@
-# Case study: rocannon in a real Ansible environment
+# Case study: natural language to ad-hoc Ansible
 
-The question this answers: *will rocannon work against my actual Ansible setup,
-with my collections and my hosts?*
+The question this answers: *can a cheap LLM drive my real Ansible environment
+from plain English, and is what it does actually Ansible (not a black box)?*
 
-rocannon adds no runtime of its own. It reads your installed collections with
-`ansible-doc`, exposes each module as a typed tool, and executes through
-`ansible-runner` over SSH. What comes out is plain Ansible, so a recorded
-session replays under `ansible-playbook` with rocannon out of the loop.
+Setup, all real and reproducible (see [Reproduce](#reproduce)):
 
-Below is a worked example against a real Red Hat UBI9 (RHEL 9.8) node over SSH,
-using the stock `ansible.builtin` and `ansible.posix` collections. Every command
-and result is from a real run and is reproducible (see [Reproduce](#reproduce)).
+- A Red Hat UBI9 (**RHEL 9.8**) node over SSH, a stand-in for a host in your
+  inventory.
+- The stock `ansible.builtin` and `ansible.posix` collections.
+- **Rocannon** exposing those collections as typed MCP tools.
+- **Claude Haiku** (a small, cheap model) driving the tools through the
+  [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/python), using a
+  logged-in Claude Code session, no API key. The driver is
+  [`agent_demo.py`](agent_demo.py), about 60 lines.
 
-## 1. Your collections become typed tools
+Haiku is given plain-English tasks. It never sees Ansible module names or
+arguments in the prompts; it picks the right module from Rocannon's tool surface
+and answers.
 
-The profile lists two collections and nothing else:
+## The session
 
-```yaml
-inventories:
-  - hosts.ini
-modules:
-  - ansible.builtin
-  - ansible.posix
-```
+Lightly trimmed from a real run (`agent_demo.py` reproduces it):
 
 ```
-$ rocannon mcp doctor --profile profile-casestudy.yml
-[ ok ] create_server (active profile: profile-casestudy, available: profile-casestudy)
+USER: What OS and version is host ubi9 running?
+  haiku -> mcp__rocannon__ansible_builtin_setup  {"target": "ubi9"}
+  haiku: Red Hat Enterprise Linux 9.8 ("Plow"), kernel 6.8.0, aarch64,
+         Python 3.9, package manager dnf.
+
+USER: Run 'uptime' on host ubi9 and report the load averages.
+  haiku -> mcp__rocannon__ansible_builtin_command  {"target": "ubi9", "cmd": "uptime"}
+  haiku: load average 1.04 (1m), 0.44 (5m), 0.32 (15m); up 1 day, 6h.
+
+USER: Set the message of the day on host ubi9 to exactly 'Managed by Rocannon',
+      and tell me whether it changed anything.
+  haiku -> mcp__rocannon__ansible_builtin_copy  {"target": "ubi9", "dest": "/etc/motd", "content": "Managed by Rocannon"}
+  haiku: Yes, it changed. /etc/motd now contains "Managed by Rocannon"
+         (changed=true, 19 bytes, root:root, 0644).
+```
+
+Three intents, three Ansible modules, picked by the model: gather facts, run an
+ad-hoc command, manage a file. A small model is enough because the tools are
+typed and discoverable, the model maps intent to module and Rocannon handles the
+schema and execution.
+
+## It is real Ansible, not a black box
+
+Two things keep this honest.
+
+**Your collections, reflected.** The profile lists collections, not modules;
+Rocannon reads them with `ansible-doc` and exposes every module:
+
+```
+$ rocannon mcp doctor --profile profile-casestudy.yml   # ansible.builtin + ansible.posix
 [ ok ] tools:              90
-[ ok ] resources:          5
 ```
 
-All 90 modules from those two collections became tools. There is no per-module
-code in rocannon; the schemas come from `ansible-doc`.
-
-## 2. It connects to a real host
-
-```
-$ rocannon ansible.builtin.ping --target ubi9 --inventory hosts.ini
-{"status": "successful", "changed": false,
- "result": {"ping": "pong", "ansible_facts": {"discovered_interpreter_python": "/usr/bin/python3.9"}}}
-```
-
-## 3. It gathers real facts
-
-```
-$ rocannon ansible.builtin.setup --target ubi9 --inventory hosts.ini
-# (key facts from the result)
-ansible_distribution=RedHat  ansible_distribution_version=9.8
-ansible_kernel=6.8.0-100-generic  ansible_pkg_mgr=dnf  ansible_architecture=aarch64
-```
-
-## 4. State management is real and idempotent
-
-```
-$ rocannon ansible.builtin.copy --target ubi9 --inventory hosts.ini --content 'Managed by rocannon' --dest /etc/motd
-status=successful changed=True
-$ # run the identical call again
-status=successful changed=False
-```
-
-## 5. Dry-run before you apply
-
-Modules that support check mode get a `--check` flag (and `--diff`), gated by the
-module's declared support. The preview reports what would change and applies
-nothing:
-
-```
-$ rocannon ansible.builtin.lineinfile --target ubi9 ... --create --check
-  preview: status=successful changed=True check_mode=True
-  after preview -> file exists: False        # nothing was written
-$ # same call without --check
-  apply:   status=successful changed=True
-  after apply  -> file exists: True
-```
-
-## 6. Your other collections work the same way
-
-`ansible.posix` is not special-cased anywhere. It is just another collection on
-the path:
-
-```
-$ rocannon ansible.posix.authorized_key --target ubi9 --inventory hosts.ini --user root --key '<pubkey>'
-status=successful changed=True
-```
-
-## 7. No lock-in: a session is standard Ansible
-
-Append `--record runbook.yml` to any call and rocannon writes each one as a play
-in a real playbook:
-
-```yaml
-# Rocannon session: runbook
-- name: ansible.builtin.copy on ubi9
-  hosts: ubi9
-  gather_facts: false
-  tasks:
-  - name: ansible.builtin.copy
-    ansible.builtin.copy:
-      content: 'Managed by rocannon'
-      dest: /etc/motd
-      ...
-- name: ansible.builtin.lineinfile on ubi9
-  hosts: ubi9
-  gather_facts: false
-  tasks:
-  - name: ansible.builtin.lineinfile
-    ansible.builtin.lineinfile:
-      path: /etc/rocannon-demo.conf
-      line: feature.enabled=1
-      create: true
-      ...
-```
-
-Run it with stock `ansible-playbook`, no rocannon involved:
+**No lock-in.** Append `--record runbook.yml` and the session is written as a
+standard playbook that runs with stock `ansible-playbook`, Rocannon out of the
+loop:
 
 ```
 $ ansible-playbook -i hosts.ini runbook.yml
-PLAY RECAP
 ubi9                       : ok=2    changed=0    unreachable=0    failed=0
 ```
 
-`changed=0` because the state already converged in the steps above. The point is
-that the artifact is ordinary Ansible your team can read, version, and run
-anywhere Ansible runs.
+So the LLM-driven path and a plain `ansible-playbook` are the same Ansible
+underneath. You can hand the recorded playbook to a teammate who has never heard
+of Rocannon.
 
-## What this means for your environment
+## Honest notes
 
-- Any collection you `ansible-galaxy install` shows up as typed tools at startup.
-  No adapter, no code generation step you maintain.
-- Execution is your Ansible: `ansible-core` plus `ansible-runner`, over your SSH
-  and your inventory. rocannon is a thin layer on top.
-- Destructive-capable modules carry MCP safety hints, and check/diff give you a
-  preview before applying.
-- Sessions are standard playbooks, so there is no migration cost and no lock-in.
-
-To freeze a known collection set for production, point rocannon at an Execution
-Environment image (built with `ansible-builder`); the tool surface becomes
-deterministic across machines. The reflection and execution shown here are
-identical, the only difference is where the collections come from.
+- **Small-model tool selection is not perfect.** Haiku reliably mapped "what
+  OS", "run uptime", and "set the motd". It missed "is the host reachable" (it
+  read that as a network ping, not `ansible.builtin.ping`). Scope the profile to
+  the modules a task needs; fewer, well-named tools select better. Larger models
+  miss less.
+- **No model required for scripting.** The same execution path is a CLI:
+  `rocannon ansible.builtin.command --target ubi9 --cmd uptime`, with
+  `--check`/`--diff` for dry-runs and `--record` for the playbook. The LLM is
+  one consumer of the tool surface, not a dependency.
 
 ## Reproduce
 
-Needs docker, the `ansible` extra, and the posix collection:
+Needs docker, the `ansible` extra, the posix collection, and a logged-in
+`claude` CLI (the Agent SDK reuses that session):
 
 ```bash
 ansible-galaxy collection install ansible.posix
+uv pip install claude-agent-sdk
 bash examples/case-study/run.sh
 docker rm -f rocannon-demo-ubi9      # teardown
 ```

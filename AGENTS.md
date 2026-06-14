@@ -3,7 +3,7 @@
 Instructions for AI coding agents working on this repo (Claude Code,
 Cursor, Bob, Codex, etc.). Humans, start with `README.md`.
 
-## What rocannon is
+## What Rocannon is
 
 An MCP server that registers every installed Ansible module as a typed MCP
 tool. One server, every module auto-discovered from `ansible-doc` at startup.
@@ -120,6 +120,8 @@ exercises the same registered tools via a real client.
 - No AI-pitchy language: leverage, robust, powerful, seamless,
   transform, harness, comprehensive, blazingly, world-class.
 - Prefer plain words over decorated ones.
+- The project is Rocannon in prose. Keep lowercase `rocannon` only for the
+  command, the package, import paths, and `rocannon://` resource URIs.
 
 **Code.**
 

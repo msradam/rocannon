@@ -1,16 +1,16 @@
-rocannon
+Rocannon
 Copyright (c) 2025-2026 Adam Munawar Rahman
 
-rocannon is licensed under the MIT License. See LICENSE for the full text.
+Rocannon is licensed under the MIT License. See LICENSE for the full text.
 
-rocannon generates an MCP server from Ansible's own module schema, so it depends
+Rocannon generates an MCP server from Ansible's own module schema, so it depends
 on and interoperates with Ansible:
 
   - ansible-core is licensed under GPL-3.0-or-later.
   - ansible-runner is licensed under Apache-2.0.
 
-rocannon does not include, copy, or link the source of ansible-core. It reads
+Rocannon does not include, copy, or link the source of ansible-core. It reads
 module and inventory schemas by running the ansible-doc and ansible-inventory
 command-line tools as subprocesses, and executes modules through the
-ansible-runner library. rocannon's own source remains under the MIT License;
+ansible-runner library. Rocannon's own source remains under the MIT License;
 each dependency is distributed under, and governed by, its own license.

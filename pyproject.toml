@@ -4,6 +4,7 @@ version = "0.1.1"
 description = "Every Ansible module as a typed MCP tool"
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE", "NOTICE"]
 authors = [
     { name = "Adam Munawar Rahman", email = "msrahmanadam@gmail.com" }
 ]
@@ -91,6 +92,7 @@ dev = [
     "pytest-cov>=7.1.0",
     "ruff>=0.15.17",
     "types-pyyaml>=6.0.12.20260518",
+    "vulture>=2.16",
 ]
 
 [tool.pytest.ini_options]
@@ -135,6 +137,12 @@ select = ["E", "W", "F", "I", "N", "UP", "B", "C4", "SIM", "S", "FURB"]
 
 [tool.ruff.format]
 quote-style = "double"
+
+# --- Vulture ---
+# 80 is vulture's recommended floor; below it, decorator-registered functions
+# (@mcp.tool, @app.command, pydantic validators) read as false positives.
+[tool.vulture]
+min_confidence = 80
 
 # --- Mypy ---
 [tool.mypy]

@@ -37,6 +37,10 @@ as MCP prompts.
 
 ![demo](https://raw.githubusercontent.com/msradam/rocannon/main/docs/assets/demo.gif)
 
+For a worked example against a real RHEL 9 host (collection reflection, real
+execution over SSH, `--check` dry-run, and replay as standard `ansible-playbook`),
+see [`examples/case-study`](examples/case-study/).
+
 ## Install
 
 ```bash

@@ -24,6 +24,7 @@ from rocannon.correlation import (
 from rocannon.executor import (
     DEFAULT_IDLE_TIMEOUT,
     DEFAULT_TIMEOUT,
+    _parse_role_result,
     _parse_runner_result,
     build_envvars,
     resolve_idle_timeout,
@@ -426,6 +427,72 @@ class TestFetchRoleSchemas:
         with patch("rocannon.schema.subprocess.run") as run:
             assert fetch_role_schemas([]) == {}
         run.assert_not_called()
+
+    def test_only_main_entry_point_is_mapped(self) -> None:
+        doc = {
+            "my.coll.web": {
+                "entry_points": {
+                    "main": {"short_description": "M", "options": {"port": {"type": "int"}}},
+                    "install": {"short_description": "I", "options": {"pkg": {"type": "str"}}},
+                }
+            }
+        }
+        completed = MagicMock()
+        completed.returncode = 0
+        completed.stdout = json.dumps(doc)
+        with patch("rocannon.schema.subprocess.run", return_value=completed):
+            s = fetch_role_schemas(["my.coll.web"])["my.coll.web"]
+        # Only the main entry point's options become params; install's pkg is ignored.
+        assert {p["name"] for p in s["parameters"]} == {"port"}
+
+    def test_role_with_entry_points_but_no_main_is_skipped(self) -> None:
+        doc = {"my.coll.x": {"entry_points": {"install": {"options": {}}}}}
+        completed = MagicMock()
+        completed.returncode = 0
+        completed.stdout = json.dumps(doc)
+        with patch("rocannon.schema.subprocess.run", return_value=completed):
+            assert fetch_role_schemas(["my.coll.x"]) == {}
+
+
+class TestParseRoleResult:
+    @staticmethod
+    def _runner(status: str, stats: dict[str, Any], events: list[dict[str, Any]] | None = None):
+        r = MagicMock()
+        r.status = status
+        r.stats = stats
+        r.events = events or []
+        return r
+
+    def test_success_with_change(self) -> None:
+        runner = self._runner(
+            "successful",
+            {"ok": {"h": 2}, "changed": {"h": 1}, "failures": {}, "dark": {}},
+        )
+        res = _parse_role_result(runner)
+        assert res["status"] == "successful"
+        assert res["changed"] is True
+        assert res["result"]["stats"]["changed"] == {"h": 1}
+        assert res["stderr"] == ""
+
+    def test_unchanged_run(self) -> None:
+        runner = self._runner(
+            "successful",
+            {"ok": {"h": 1}, "changed": {}, "failures": {}, "dark": {}},
+        )
+        assert _parse_role_result(runner)["changed"] is False
+
+    def test_failure_is_surfaced(self) -> None:
+        events = [
+            {"event": "runner_on_failed", "event_data": {"host": "h", "res": {"msg": "boom"}}}
+        ]
+        runner = self._runner(
+            "failed",
+            {"ok": {}, "changed": {}, "failures": {"h": 1}, "dark": {}},
+            events,
+        )
+        res = _parse_role_result(runner)
+        assert res["status"] == "failed"
+        assert "boom" in res["stderr"]
 
 
 class TestFetchModuleSchemas:

@@ -9,6 +9,8 @@ class Config(BaseModel):
 
     inventories: list[Path] = []
     modules: list[str] = []
+    roles: list[str] = []
+    roles_path: Path | None = None
     transport: str = "stdio"
     timeouts: dict[str, int] = {}
     ansible_cfg: Path | None = None
@@ -35,15 +37,25 @@ class Config(BaseModel):
             raise ValueError(f"file not found: {v}")
         return v.expanduser().resolve()
 
+    @field_validator("roles_path")
+    @classmethod
+    def roles_path_must_exist(cls, v: Path | None) -> Path | None:
+        if v is None:
+            return None
+        if not v.expanduser().exists():
+            raise ValueError(f"roles_path not found: {v}")
+        return v.expanduser().resolve()
+
     @model_validator(mode="after")
     def ansible_fully_configured(self) -> "Config":
-        """Require both inventories and modules to be set."""
+        """Require an inventory and at least one of modules or roles."""
         has_inv = bool(self.inventories)
-        has_mods = bool(self.modules)
-        if not (has_inv and has_mods):
+        has_tools = bool(self.modules) or bool(self.roles)
+        if not (has_inv and has_tools):
             raise ValueError(
-                f"Rocannon needs both 'inventories' and 'modules' to be set "
-                f"(got inventories={self.inventories!r}, modules={self.modules!r})."
+                f"Rocannon needs 'inventories' and at least one of 'modules' or "
+                f"'roles' (got inventories={self.inventories!r}, "
+                f"modules={self.modules!r}, roles={self.roles!r})."
             )
         return self
 
@@ -61,7 +73,7 @@ def load_profile(path: Path, transport: str = "stdio") -> Config:
 
     if "inventories" in raw:
         raw["inventories"] = [resolve(p) for p in raw["inventories"]]
-    for key in ("ansible_cfg", "vault_password_file"):
+    for key in ("ansible_cfg", "vault_password_file", "roles_path"):
         if raw.get(key):
             raw[key] = resolve(raw[key])
 

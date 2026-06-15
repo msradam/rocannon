@@ -108,6 +108,14 @@ fields ansible-doc already provides (requirements, return keys, seealso,
 version_added, deprecation) under an `ansible` key. Anything the module does not
 document is omitted rather than emitted empty.
 
+**Roles.** A profile's `roles` are exposed the same way. `ansible-doc -t role -j`
+documents a role's `entry_points.<name>.options` in the same shape as a module's
+`doc.options`, so `fetch_role_schemas` maps the `main` entry point to a typed
+tool (parameters + `target`, tagged `role`). Execution goes through
+`executor.run_role` (`ansible_runner.run(role=..., extravars=...)`); the role's
+argument_specs are validated by ansible at run time. Roles without an
+argument_specs document expose no typed interface and are skipped.
+
 **Quirks.**
 - `register_ansible_modules` fetches all requested module schemas in a single
   batched `ansible-doc -j <names...>` call (chunked for very large sets) via

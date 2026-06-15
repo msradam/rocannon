@@ -162,6 +162,76 @@ def run_module(
     return result
 
 
+def run_role(
+    role: str,
+    role_args: dict[str, Any],
+    inventory: list[str],
+    host_pattern: str,
+    roles_path: str | None = None,
+    timeout: int | None = None,
+    idle_timeout: int | None = None,
+    envvars: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Execute an Ansible role via ansible-runner's ``run(role=...)``.
+
+    Role arguments are passed as extravars; the role's argument_specs validate
+    them at runtime (a missing required arg fails the run). Returns a structured
+    result with the per-host stats recap rather than a single module's output.
+    """
+    if timeout is None:
+        timeout = resolve_timeout()
+    if idle_timeout is None:
+        idle_timeout = resolve_idle_timeout()
+    abs_inventory = [
+        str(p if (p := Path(inv)).is_absolute() else Path.cwd() / p) for inv in inventory
+    ]
+    extra: dict[str, Any] = {}
+    if roles_path:
+        extra["roles_path"] = str(roles_path)
+    try:
+        runner = ansible_runner.run(
+            role=role,
+            host_pattern=host_pattern,
+            inventory=abs_inventory,
+            extravars=role_args or {},
+            quiet=True,
+            timeout=timeout,
+            settings={"idle_timeout": idle_timeout},
+            envvars=envvars,
+            **extra,
+        )
+    except Exception as exc:
+        return {
+            "status": "error",
+            "changed": False,
+            "result": {},
+            "stdout": "",
+            "stderr": redact_text(str(exc)),
+        }
+    return _parse_role_result(runner)
+
+
+def _parse_role_result(runner: Any) -> dict[str, Any]:
+    """Summarize a role run from ansible-runner's stats and failure events."""
+    stats = runner.stats or {}
+    changed = any((stats.get("changed") or {}).values())
+    failed = any((stats.get("failures") or {}).values()) or any((stats.get("dark") or {}).values())
+    status = "failed" if (failed or runner.status != "successful") else "successful"
+    errors = []
+    for event in runner.events:
+        if event.get("event") in ("runner_on_failed", "runner_on_unreachable"):
+            data = event.get("event_data") or {}
+            res = data.get("res") or {}
+            errors.append(f"{data.get('host', '?')}: {res.get('msg') or event.get('event')}")
+    return {
+        "status": status,
+        "changed": bool(changed),
+        "result": {"stats": stats},
+        "stdout": "",
+        "stderr": redact_text("\n".join(errors)) if errors else "",
+    }
+
+
 def build_inventory_list(inventory_paths: list[Path]) -> list[str]:
     """Convert inventory Path objects to strings for ansible-runner."""
     return [str(p) for p in inventory_paths]

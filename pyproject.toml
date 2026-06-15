@@ -8,10 +8,7 @@ license-files = ["LICENSE", "NOTICE"]
 authors = [
     { name = "Adam Munawar Rahman", email = "msrahmanadam@gmail.com" }
 ]
-# Upper bound tracks ansible-core's actual supported interpreters; it declares
-# >=3.12 but does not yet run on 3.14. Capping steers installers to a working
-# Python instead of a broken one. Raise it when ansible-core supports 3.14.
-requires-python = ">=3.12,<3.14"
+requires-python = ">=3.12"
 keywords = [
     "ansible",
     "mcp",

@@ -149,6 +149,8 @@ class RuntimeContext:
         # after `expand_modules`, read by each tool call to check whether the
         # active profile declares the module being invoked.
         self.expanded_modules: dict[str, set[str]] = {}
+        # Per-profile role-name sets, same idea for role tools.
+        self.expanded_roles: dict[str, set[str]] = {}
 
     @property
     def active_name(self) -> str:
@@ -163,6 +165,10 @@ class RuntimeContext:
     def is_module_active(self, module_name: str) -> bool:
         """True if ``module_name`` is declared by the currently-active profile."""
         return module_name in self.expanded_modules.get(self._active_name, set())
+
+    def is_role_active(self, role_name: str) -> bool:
+        """True if ``role_name`` is declared by the currently-active profile."""
+        return role_name in self.expanded_roles.get(self._active_name, set())
 
     async def set_active(self, name: str) -> LoadedProfile:
         async with self._lock:

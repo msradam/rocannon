@@ -39,6 +39,7 @@ from rocannon.schema import (
     expand_modules,
     fetch_module_schema,
     fetch_module_schemas,
+    fetch_role_schemas,
 )
 
 # ---------------------------------------------------------------------------
@@ -61,16 +62,31 @@ class TestConfig:
     def test_inventories_without_modules_raises(self, tmp_path: Path) -> None:
         inv = tmp_path / "inv.yml"
         inv.write_text("all:\n  hosts:\n    localhost:\n")
-        with pytest.raises(ValueError, match="needs both 'inventories' and 'modules'"):
+        with pytest.raises(ValueError, match="needs 'inventories' and at least one"):
             Config(inventories=[inv], modules=[])
 
     def test_modules_without_inventories_raises(self) -> None:
-        with pytest.raises(ValueError, match="needs both 'inventories' and 'modules'"):
+        with pytest.raises(ValueError, match="needs 'inventories' and at least one"):
             Config(inventories=[], modules=["ansible.builtin.ping"])
 
     def test_empty_config_raises(self) -> None:
-        with pytest.raises(ValueError, match="needs both 'inventories' and 'modules'"):
+        with pytest.raises(ValueError, match="needs 'inventories' and at least one"):
             Config()
+
+    def test_roles_only_config_is_valid(self, tmp_path: Path) -> None:
+        inv = tmp_path / "inv.yml"
+        inv.write_text("all:\n  hosts:\n    localhost:\n")
+        rp = tmp_path / "roles"
+        rp.mkdir()
+        config = Config(inventories=[inv], roles=["my.coll.role"], roles_path=rp)
+        assert config.roles == ["my.coll.role"]
+        assert config.roles_path is not None and config.roles_path.is_absolute()
+
+    def test_missing_roles_path_raises(self, tmp_path: Path) -> None:
+        inv = tmp_path / "inv.yml"
+        inv.write_text("all:\n  hosts:\n    localhost:\n")
+        with pytest.raises(ValueError, match="roles_path not found"):
+            Config(inventories=[inv], roles=["r"], roles_path=tmp_path / "nope")
 
     def test_load_profile(self, tmp_path: Path) -> None:
         inv = tmp_path / "inv.yml"
@@ -369,6 +385,47 @@ class TestToolTags:
 
         assert _tags_for("ansible.builtin.copy") == {"ansible.builtin", "ansible"}
         assert _tags_for("community.crypto.openssl_privatekey") == {"community.crypto", "community"}
+
+
+class TestFetchRoleSchemas:
+    _ROLE_DOC = {
+        "my.coll.web": {
+            "entry_points": {
+                "main": {
+                    "short_description": "Configure the web tier",
+                    "options": {
+                        "port": {"type": "int", "required": True, "description": "Listen port"},
+                        "workers": {"type": "int", "default": 4},
+                    },
+                }
+            }
+        }
+    }
+
+    def test_parses_role_main_entry_point(self) -> None:
+        completed = MagicMock()
+        completed.returncode = 0
+        completed.stdout = json.dumps(self._ROLE_DOC)
+        with patch("rocannon.schema.subprocess.run", return_value=completed):
+            schemas = fetch_role_schemas(["my.coll.web"])
+        s = schemas["my.coll.web"]
+        assert s["is_role"] is True
+        assert s["meta"] == {"kind": "role", "entry_point": "main"}
+        assert {p["name"] for p in s["parameters"]} == {"port", "workers"}
+        assert s["description"] == "Configure the web tier"
+
+    def test_role_without_argspec_is_skipped(self) -> None:
+        completed = MagicMock()
+        completed.returncode = 0
+        completed.stdout = json.dumps({"my.coll.bare": {}})  # no entry_points
+        with patch("rocannon.schema.subprocess.run", return_value=completed):
+            schemas = fetch_role_schemas(["my.coll.bare"])
+        assert schemas == {}
+
+    def test_empty_input_makes_no_call(self) -> None:
+        with patch("rocannon.schema.subprocess.run") as run:
+            assert fetch_role_schemas([]) == {}
+        run.assert_not_called()
 
 
 class TestFetchModuleSchemas:

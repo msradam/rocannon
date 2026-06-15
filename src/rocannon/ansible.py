@@ -23,10 +23,15 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from rocannon.correlation import get_call_metadata
-from rocannon.executor import build_envvars, build_inventory_list, run_module
+from rocannon.executor import build_envvars, build_inventory_list, run_module, run_role
 from rocannon.inventory import load_inventory
 from rocannon.redaction import redact
-from rocannon.schema import ANSIBLE_TYPE_MAP, expand_modules, fetch_module_schemas
+from rocannon.schema import (
+    ANSIBLE_TYPE_MAP,
+    expand_modules,
+    fetch_module_schemas,
+    fetch_role_schemas,
+)
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -74,6 +79,7 @@ def register_ansible_modules(
         union_groups.update(inv["groups"])
         expanded = set(expand_modules(lp.config.modules))
         runtime.expanded_modules[name] = expanded
+        runtime.expanded_roles[name] = set(lp.config.roles)
         union_modules.update(expanded)
         logger.info(
             "Profile %r: %d hosts, %d groups, %d modules",
@@ -109,6 +115,35 @@ def register_ansible_modules(
         except Exception as exc:
             report.tools_failed.append(module_name)
             logger.warning("Failed to register %s: %s", module_name, exc)
+
+    # Role tools: a role with an argument_specs.yml is documented by ansible-doc
+    # like a module and executed via run_role. Fetch per profile so each
+    # profile's roles_path applies; register the union once.
+    role_schemas: dict[str, dict[str, Any]] = {}
+    for lp in registry.profiles.values():
+        if not lp.config.roles:
+            continue
+        rp = str(lp.config.roles_path) if lp.config.roles_path else None
+        role_schemas.update(fetch_role_schemas(list(lp.config.roles), roles_path=rp))
+    union_roles = (
+        sorted(set().union(*runtime.expanded_roles.values())) if runtime.expanded_roles else []
+    )
+    for role_name in union_roles:
+        schema = role_schemas.get(role_name)
+        if schema is None:
+            report.tools_failed.append(role_name)
+            logger.warning(
+                "Skipping role %s: no argument_specs documented (ansible-doc -t role)", role_name
+            )
+            continue
+        try:
+            _register_role_tool(mcp, role_name, schema, union_inv, runtime)
+            schema_cache[role_name] = schema
+            report.tools_registered += 1
+            report.tool_names.append(role_name)
+        except Exception as exc:
+            report.tools_failed.append(role_name)
+            logger.warning("Failed to register role %s: %s", role_name, exc)
 
     if report.tools_registered == 0:
         raise ValueError(
@@ -516,5 +551,142 @@ def _make_tool_fn(
     tool_fn.__annotations__ = annotations
     tool_fn.__signature__ = inspect.Signature(sig_params)  # type: ignore[attr-defined]
     tool_fn.__name__ = module_name.replace(".", "_")
+
+    return tool_fn
+
+
+def _register_role_tool(
+    mcp: FastMCP,
+    role_name: str,
+    schema: dict[str, Any],
+    inv: dict[str, list[str]],
+    runtime: RuntimeContext,
+) -> None:
+    """Register a role (with an argument_specs interface) as an MCP tool."""
+    fn = _make_role_tool_fn(role_name, schema, inv, runtime)
+    role_meta = schema.get("meta") or {}
+    mcp.tool(
+        name=role_name,
+        description=schema["description"],
+        tags=_tags_for(role_name) | {"role"},
+        output_schema=_RESULT_SCHEMA,
+        meta={"ansible": role_meta} if role_meta else None,
+    )(fn)
+
+
+def _make_role_tool_fn(
+    role_name: str,
+    schema: dict[str, Any],
+    inv: dict[str, list[str]],
+    runtime: RuntimeContext,
+) -> Any:
+    """Async tool function for a role: typed `target` plus the role's argspec.
+
+    No check/diff (those are per-task, not role-level). Executes via run_role,
+    which passes the arguments as extravars for ansible to validate.
+    """
+    target_annotation = _build_target_annotation(inv)
+    annotations: dict[str, Any] = {"target": target_annotation}
+    sig_params: list[inspect.Parameter] = [
+        inspect.Parameter("target", inspect.Parameter.KEYWORD_ONLY, annotation=target_annotation),
+    ]
+    reserved = {"target", "ctx"}
+    name_map: dict[str, str] = {}
+    seen_names: set[str] = reserved.copy()
+    for p in schema["parameters"]:
+        ansible_name = p["name"]
+        python_name = _sanitize_param_name(ansible_name, reserved)
+        while python_name in seen_names:
+            python_name = f"{python_name}_"
+        seen_names.add(python_name)
+        name_map[python_name] = ansible_name
+        py_type = _ansible_type_to_python(p)
+        desc = p.get("description", "")
+        if p.get("required", False):
+            ann = Annotated[py_type, Field(description=desc)]  # type: ignore[valid-type]
+            annotations[python_name] = ann
+            sig_params.append(
+                inspect.Parameter(python_name, inspect.Parameter.KEYWORD_ONLY, annotation=ann)
+            )
+        else:
+            default = p.get("default")
+            optional_type = py_type | None if default is None else py_type
+            ann = Annotated[optional_type, Field(description=desc)]  # type: ignore[misc]
+            annotations[python_name] = ann
+            sig_params.append(
+                inspect.Parameter(
+                    python_name,
+                    inspect.Parameter.KEYWORD_ONLY,
+                    annotation=ann,
+                    default=default,
+                )
+            )
+
+    annotations["ctx"] = Context
+    sig_params.append(
+        inspect.Parameter(
+            "ctx", inspect.Parameter.KEYWORD_ONLY, annotation=Context, default=CurrentContext()
+        )
+    )
+
+    async def tool_fn(**kwargs: Any) -> dict[str, Any]:
+        ctx: Context = kwargs.pop("ctx", None)
+        target: str = kwargs.pop("target")
+        role_args = {name_map.get(k, k): v for k, v in kwargs.items() if v is not None}
+
+        meta = get_call_metadata()
+        if meta is not None:
+            meta["args"] = redact(role_args | {"target": target})
+
+        if not runtime.is_role_active(role_name):
+            err = {
+                "status": "error",
+                "changed": False,
+                "result": {},
+                "stdout": "",
+                "stderr": (
+                    f"Role {role_name!r} is not declared in the active profile "
+                    f"{runtime.active_name!r}. Switch with rocannon_use_profile."
+                ),
+            }
+            if meta is not None:
+                meta["result"] = err
+                meta["status"] = "error"
+            return err
+
+        cfg = runtime.active_config()
+        inventory_list = build_inventory_list(cfg.inventories)
+        envvars = build_envvars(
+            extra_envvars=cfg.extra_envvars,
+            ansible_cfg=cfg.ansible_cfg,
+            vault_password_file=cfg.vault_password_file,
+        )
+        roles_path = str(cfg.roles_path) if cfg.roles_path else None
+
+        if ctx and ctx.request_context:
+            await ctx.info(f"Running role {role_name} on {target} [profile={runtime.active_name}]")
+        else:
+            logger.info(
+                "Running role %s on %s [profile=%s]", role_name, target, runtime.active_name
+            )
+
+        result = await asyncio.to_thread(
+            run_role,
+            role=role_name,
+            role_args=role_args,
+            inventory=inventory_list,
+            host_pattern=target,
+            roles_path=roles_path,
+            timeout=cfg.timeouts.get(role_name),
+            envvars=envvars,
+        )
+        if meta is not None:
+            meta["result"] = result
+            meta["status"] = result.get("status", "ok")
+        return result
+
+    tool_fn.__annotations__ = annotations
+    tool_fn.__signature__ = inspect.Signature(sig_params)  # type: ignore[attr-defined]
+    tool_fn.__name__ = role_name.replace(".", "_")
 
     return tool_fn

@@ -124,7 +124,7 @@ accept `--check` and `--diff`.
 
 ## Profiles
 
-A profile is a YAML file declaring inventory + modules:
+A profile is a YAML file declaring inventory + modules (and, optionally, roles):
 
 ```yaml
 inventories:
@@ -132,6 +132,9 @@ inventories:
 modules:
   - ansible.builtin
   - community.docker
+roles:                              # optional
+  - my_namespace.my_collection.setup_web
+roles_path: ./roles                 # optional, for standalone (non-collection) roles
 ansible_cfg: ./ansible.cfg          # optional
 vault_password_file: ~/.vault_pass  # optional
 extra_envvars:                      # optional
@@ -142,6 +145,16 @@ extra_envvars:                      # optional
 (`ansible.builtin`), or a namespace (`community`). Only Ansible modules become
 tools; filter, lookup, and other plugin types are skipped. Listing specific
 modules keeps the tool surface focused on what a task needs.
+
+`roles` exposes Ansible roles as tools the same way. A role that ships a
+`meta/argument_specs.yml` is documented by `ansible-doc` just like a module, so
+its `main` entry point's arguments become the tool's typed parameters; ansible
+validates them at run time. Roles without an argument spec are skipped (they
+have no typed interface to expose). Collection roles resolve by FQCN. For a
+standalone role, set `roles_path` (it resolves against the profile's own
+directory, like `inventories`) and list the role by its directory name, for
+example `roles: [setup_web]` with `roles_path: ./roles`. The role's tool name is
+that same name.
 
 Modules with third-party Python dependencies (for example `community.crypto`
 needs `cryptography`, `community.docker` needs the `docker` SDK, `network_cli`

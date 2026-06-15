@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import subprocess
 from typing import Any
 
@@ -171,6 +172,75 @@ def _parse_module_doc(module_name: str, module_doc: dict[str, Any]) -> dict[str,
         "parameters": parameters,
         "attributes": _parse_attributes(doc_entry.get("attributes") or {}),
         "meta": _build_meta(module_doc, doc_entry),
+    }
+
+
+def fetch_role_schemas(
+    role_names: list[str], roles_path: str | None = None
+) -> dict[str, dict[str, Any]]:
+    """Fetch and parse ansible-doc JSON for roles, like modules but ``-t role``.
+
+    A role with a ``meta/argument_specs.yml`` is documented the same way a
+    module is: ``entry_points.<name>.options`` mirrors ``doc.options``. Only the
+    ``main`` entry point is mapped. Roles without a documented argspec produce no
+    schema and are skipped; the caller reports the gap.
+    """
+    names = list(dict.fromkeys(role_names))
+    if not names:
+        return {}
+
+    from rocannon.executor import ensure_ansible_on_path
+
+    ensure_ansible_on_path()
+    env = {**os.environ, "ANSIBLE_ROLES_PATH": roles_path} if roles_path else None
+    schemas: dict[str, dict[str, Any]] = {}
+    for i in range(0, len(names), _DOC_BATCH_SIZE):
+        chunk = names[i : i + _DOC_BATCH_SIZE]
+        result = subprocess.run(
+            ["ansible-doc", "-t", "role", "-j", *chunk],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            logger.warning("ansible-doc -t role failed for %d role(s)", len(chunk))
+            continue
+        try:
+            doc = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            logger.warning("Unparsable ansible-doc -t role output for %d role(s)", len(chunk))
+            continue
+        for name in chunk:
+            parsed = _parse_role_doc(name, doc.get(name, {}))
+            if parsed is not None:
+                schemas[name] = parsed
+    return schemas
+
+
+def _parse_role_doc(
+    role_name: str, role_doc: dict[str, Any], entry_point: str = "main"
+) -> dict[str, Any] | None:
+    """Parse a role's ``main`` entry point into the same schema shape as a module.
+
+    Returns None when the role has no documented entry point (no
+    argument_specs), which is how a role becomes untyped and is skipped.
+    """
+    entry = (role_doc.get("entry_points") or {}).get(entry_point)
+    if not isinstance(entry, dict):
+        return None
+    options = entry.get("options") or {}
+    parameters = [
+        _parse_parameter(name, info) for name, info in options.items() if isinstance(info, dict)
+    ]
+    description = entry.get("short_description") or f"Ansible role {role_name}"
+    return {
+        "name": role_name,
+        "description": _flatten_description(description),
+        "parameters": parameters,
+        "attributes": {},
+        "meta": {"kind": "role", "entry_point": entry_point},
+        "is_role": True,
+        "entry_point": entry_point,
     }
 
 

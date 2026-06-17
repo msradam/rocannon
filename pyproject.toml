@@ -1,6 +1,6 @@
 [project]
 name = "rocannon"
-version = "0.1.3"
+version = "0.1.4"
 description = "Every Ansible module as a typed MCP tool"
 readme = "README.md"
 license = "MIT"

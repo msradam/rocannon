@@ -16,6 +16,10 @@
     .lk-sidebar { display: flex; flex-direction: column; justify-content: flex-start; min-height: 100vh; }
     .sidebar-footer { margin-top: auto; padding: 0.75rem 1rem; border-top: 1px solid var(--lk-border, #333); }
     .theme-btn { background: none; border: 1px solid var(--lk-border, #555); padding: 0.2rem 0.6rem; font-size: 0.7rem; cursor: pointer; color: inherit; font-family: inherit; }
+    .lk-nav-item { padding-top: 0.3rem !important; padding-bottom: 0.3rem !important; }
+    .lk-nav-section { margin-top: 1rem !important; }
+    .lk-note { display: block !important; }
+    .lk-note > div { display: block; }
   </style>
 </head>
 <body class="lk lk-sheet">
@@ -39,6 +43,8 @@
         <span class="lk-nav-section">Concepts</span>
         <a href="architecture.html" class="lk-nav-item">How it Works</a>
         <a href="comparison.html" class="lk-nav-item">vs Dedicated MCP</a>
+        <a href="mainframes.html" class="lk-nav-item">Mainframes</a>
+        <a href="ecosystem.html" class="lk-nav-item">Ansible ecosystem</a>
       </div>
     </nav>
     <div class="sidebar-footer">
@@ -64,7 +70,7 @@
       <div class="page-content">
 
         <h1>MCP Clients</h1>
-        <p>Rocannon works with any MCP client. All use the same command: <code class="lk-code-inline">rocannon mcp serve --profile &lt;path&gt;</code>. Use an absolute path — clients spawn the server from their own working directory, not yours.</p>
+        <p>Rocannon works with any MCP client. All use the same command: <code class="lk-code-inline">rocannon mcp serve --profile &lt;path&gt;</code>. Use an absolute path. Clients spawn the server from their own working directory, not yours.</p>
 
         <table class="lk-table" style="margin-bottom:2rem">
           <thead>
@@ -128,8 +134,9 @@
       - --profile
       - /absolute/path/to/profile.yml</code></pre>
         <div class="lk-note lk-note-info">
-          <strong>mcphost env field.</strong> mcphost ignores the <code class="lk-code-inline">env</code> field in its config. To pass environment variables, use the <code class="lk-code-inline">command: env</code> workaround:
-          <pre class="lk-code" style="margin-top:0.5rem"><code>servers:
+          <div>
+            <p><strong>mcphost env field.</strong> mcphost ignores the <code class="lk-code-inline">env</code> field in its config. To pass environment variables, use the <code class="lk-code-inline">command: env</code> workaround:</p>
+            <pre class="lk-code" style="margin-top:0.5rem"><code>servers:
   rocannon:
     command: env
     args:
@@ -139,6 +146,7 @@
       - serve
       - --profile
       - /absolute/path/to/profile.yml</code></pre>
+          </div>
         </div>
 
         <h2>IBM Bob</h2>

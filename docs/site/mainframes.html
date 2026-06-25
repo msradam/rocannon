@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="onyx">
+<head>
+  <meta charset="utf-8">
+  <script>(function(){var t=localStorage.getItem('lk-theme');if(t)document.documentElement.setAttribute('data-theme',t);}())</script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rocannon on the Mainframe — Rocannon</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/msradam/lokta-css@main/lokta.css">
+  <style>
+    .page-content { max-width: 800px; }
+    pre.lk-code { margin: 0.75rem 0; }
+    .lk-sidebar-brand { display: flex; align-items: center; gap: 0.6rem; }
+    .brand-logo { width: 28px; height: 28px; }
+    h2 { margin-top: 2.5rem; }
+    h3 { margin-top: 1.75rem; }
+    [data-theme="paper"] .brand-logo { filter: brightness(0.55) saturate(0.7); }
+    .lk-sidebar { display: flex; flex-direction: column; justify-content: flex-start; min-height: 100vh; }
+    .sidebar-footer { margin-top: auto; padding: 0.75rem 1rem; border-top: 1px solid var(--lk-border, #333); }
+    .theme-btn { background: none; border: 1px solid var(--lk-border, #555); padding: 0.2rem 0.6rem; font-size: 0.7rem; cursor: pointer; color: inherit; font-family: inherit; }
+    .lk-nav-item { padding-top: 0.3rem !important; padding-bottom: 0.3rem !important; }
+    .lk-nav-section { margin-top: 1rem !important; }
+    .lk-note { display: block !important; }
+    .lk-note > div { display: block; }
+  </style>
+</head>
+<body class="lk lk-sheet">
+<div class="lk-shell">
+
+  <aside class="lk-sidebar">
+    <div class="lk-sidebar-brand">
+      <img src="../assets/gryphon.svg" alt="" class="brand-logo">
+      <strong>Rocannon</strong>
+      <span class="lk-tag">v0.1.4</span>
+    </div>
+    <nav>
+      <div class="lk-nav">
+        <span class="lk-nav-section">Getting Started</span>
+        <a href="index.html" class="lk-nav-item">Overview</a>
+        <a href="quickstart.html" class="lk-nav-item">Quickstart</a>
+        <span class="lk-nav-section">Reference</span>
+        <a href="profiles.html" class="lk-nav-item">Profiles</a>
+        <a href="cli.html" class="lk-nav-item">CLI</a>
+        <a href="clients.html" class="lk-nav-item">MCP Clients</a>
+        <span class="lk-nav-section">Concepts</span>
+        <a href="architecture.html" class="lk-nav-item">How it Works</a>
+        <a href="comparison.html" class="lk-nav-item">vs Dedicated MCP</a>
+        <a href="mainframes.html" class="lk-nav-item" aria-current="page">Mainframes</a>
+        <a href="ecosystem.html" class="lk-nav-item">Ansible ecosystem</a>
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="theme-btn" id="theme-btn" onclick="lkThemeToggle()">Light</button>
+    </div>
+  </aside>
+  <script>
+    function lkThemeToggle(){
+      var html = document.documentElement;
+      var next = html.getAttribute('data-theme') === 'onyx' ? 'paper' : 'onyx';
+      html.setAttribute('data-theme', next);
+      localStorage.setItem('lk-theme', next);
+      document.getElementById('theme-btn').textContent = next === 'onyx' ? 'Light' : 'Dark';
+    }
+    document.addEventListener('DOMContentLoaded', function(){
+      var btn = document.getElementById('theme-btn');
+      if (btn) btn.textContent = document.documentElement.getAttribute('data-theme') === 'onyx' ? 'Light' : 'Dark';
+    });
+  </script>
+
+  <main class="lk-main">
+    <div class="lk-content">
+      <div class="page-content">
+
+        <h1>Rocannon on the mainframe</h1>
+        <p>Rocannon started with IBM z/OS. The creator (Adam) works on IBM Z software. Browsing the <code class="lk-code-inline">ibm.ibm_zos_core</code> module catalog through <code class="lk-code-inline">ansible-doc</code> is what made the idea of turning every Ansible module into a typed MCP tool feel worth building. The collection has one of the richest, most consistently documented parameter surfaces in the entire Ansible ecosystem. It was a natural fit.</p>
+
+        <h2>Why z/OS has been underserved by AI tooling</h2>
+        <p>Configuration management and conversational AI tools tend to assume POSIX systems. z/OS is POSIX-capable through USS, but its native interfaces — SYSFS, JES, the operator console, VSAM, SMS-managed data sets — have no parallel in Linux abstractions. Tools designed for Linux either break or simply don't exist for z/OS.</p>
+        <p>Ansible changed the automation story. The IBM z/OS collections provide idempotent, typed interfaces for everything from job submission to data set management to HMC operations. Rocannon adds an MCP layer on top of that investment, so any LLM can call those modules against a real z/OS system.</p>
+
+        <h2>IBM z/OS collections Rocannon supports</h2>
+
+        <h3>ibm.ibm_zos_core</h3>
+        <p>The primary collection for z/OS automation. Install it with <code class="lk-code-inline">ansible-galaxy collection install ibm.ibm_zos_core</code> and Rocannon registers all its modules as typed MCP tools.</p>
+        <table class="lk-table" style="margin-bottom:1.5rem">
+          <thead><tr><th>Module</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code class="lk-code-inline">zos_job_submit</code></td><td>Submit JCL from a data set or USS path, return the job ID</td></tr>
+            <tr><td><code class="lk-code-inline">zos_job_query</code></td><td>Query job status by name or ID</td></tr>
+            <tr><td><code class="lk-code-inline">zos_job_output</code></td><td>Retrieve spool output for a completed job</td></tr>
+            <tr><td><code class="lk-code-inline">zos_data_set</code></td><td>Create, delete, and manage MVS data sets including PDS and VSAM</td></tr>
+            <tr><td><code class="lk-code-inline">zos_copy</code></td><td>Copy between data sets, USS paths, and the control node</td></tr>
+            <tr><td><code class="lk-code-inline">zos_fetch</code></td><td>Retrieve a data set or USS file to the control node</td></tr>
+            <tr><td><code class="lk-code-inline">zos_operator</code></td><td>Issue an operator command and return the console response</td></tr>
+            <tr><td><code class="lk-code-inline">zos_find</code></td><td>Search for data sets or USS files by name pattern</td></tr>
+            <tr><td><code class="lk-code-inline">zos_archive</code></td><td>Archive data sets into a portable format</td></tr>
+            <tr><td><code class="lk-code-inline">zos_unarchive</code></td><td>Restore an archive to data sets on a target z/OS system</td></tr>
+          </tbody>
+        </table>
+
+        <h3>ibm.ibm_zos_zosmf</h3>
+        <p>Automation through the z/OSMF REST interface. Useful for provisioning workflows, software instance management, and cloud-style lifecycle operations on z/OS without direct SSH access to individual LPARs.</p>
+
+        <h3>ibm.ibm_zos_hmc</h3>
+        <p>Hardware Management Console automation: LPAR management, CPC operations, and system-level configuration changes through the HMC API.</p>
+
+        <h2>What this looks like in practice</h2>
+        <p>A session with Rocannon and <code class="lk-code-inline">ibm.ibm_zos_core</code> against a real z/OS system:</p>
+
+        <blockquote class="lk-quote">
+          <p>Submit the job in HLQ.TEST.JCL(IEFBR14), wait for it to complete, and show me the spool output.</p>
+        </blockquote>
+        <p>Rocannon calls <code class="lk-code-inline">zos_job_submit</code>, polls with <code class="lk-code-inline">zos_job_query</code>, then fetches output with <code class="lk-code-inline">zos_job_output</code>. Each step is a typed module call. The LLM sees actual return codes, step names, and DD output, not a raw shell scrape.</p>
+
+        <blockquote class="lk-quote">
+          <p>Check if HLQ.PROD.LOAD exists and if it does, copy it to HLQ.PROD.LOAD.BKUP before we make changes.</p>
+        </blockquote>
+        <p>That's <code class="lk-code-inline">zos_data_set</code> with <code class="lk-code-inline">state: query</code>, then <code class="lk-code-inline">zos_copy</code>. Add <code class="lk-code-inline">check=true</code> to preview the copy before committing it.</p>
+
+        <blockquote class="lk-quote">
+          <p>Issue a D IPLINFO operator command and tell me when this system was last IPLed.</p>
+        </blockquote>
+        <p>One call to <code class="lk-code-inline">zos_operator</code>. The response comes back as structured text; the LLM parses the IPL date out of it and answers in plain English.</p>
+
+        <div class="lk-note lk-note-info">
+          <div><strong>LinuxONE control node.</strong> Rocannon runs on the Ansible control node, which can be LinuxONE (RHEL for s390x) for a fully on-premises setup. Managed nodes are z/OS systems reached via SSH through IBM z/OS OpenSSH.</div>
+        </div>
+
+        <h2>Why the module model fits z/OS</h2>
+        <p>z/OS operations are structured in a way that maps well to typed tools. A job submission has a known schema. A data set operation has documented parameters. An operator command returns formatted console output. These aren't open-ended shell commands that could do anything; they're declared interfaces with known inputs and outputs.</p>
+        <p>That matters for safety. Rocannon tags <code class="lk-code-inline">zos_find</code> and <code class="lk-code-inline">zos_job_query</code> as read-only. Data set operations expose check mode. The profile restricts which hosts and module combinations the agent can reach. Compare that to raw SSH access to an operator console, where a single mistyped command can affect the entire system.</p>
+
+        <h2>The broader picture</h2>
+        <p>z/OS still runs a substantial share of global financial transactions, healthcare records, and government systems. The people maintaining those systems have had solid Ansible support since the IBM collections matured. They have had essentially no AI-native interactive tooling.</p>
+        <p>Rocannon doesn't replace z/OS expertise. It brings that expertise into conversational sessions. An LLM that can call <code class="lk-code-inline">zos_job_output</code> against a real system, read the return code, and suggest what to check next is more useful than one that generates hypothetical JCL and stops there.</p>
+
+      </div>
+    </div>
+  </main>
+
+</div>
+</body>
+</html>

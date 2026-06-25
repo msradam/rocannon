@@ -17,6 +17,10 @@
     .lk-sidebar { display: flex; flex-direction: column; justify-content: flex-start; min-height: 100vh; }
     .sidebar-footer { margin-top: auto; padding: 0.75rem 1rem; border-top: 1px solid var(--lk-border, #333); }
     .theme-btn { background: none; border: 1px solid var(--lk-border, #555); padding: 0.2rem 0.6rem; font-size: 0.7rem; cursor: pointer; color: inherit; font-family: inherit; }
+    .lk-nav-item { padding-top: 0.3rem !important; padding-bottom: 0.3rem !important; }
+    .lk-nav-section { margin-top: 1rem !important; }
+    .lk-note { display: block !important; }
+    .lk-note > div { display: block; }
   </style>
 </head>
 <body class="lk lk-sheet">
@@ -40,6 +44,8 @@
         <span class="lk-nav-section">Concepts</span>
         <a href="architecture.html" class="lk-nav-item" aria-current="page">How it Works</a>
         <a href="comparison.html" class="lk-nav-item">vs Dedicated MCP</a>
+        <a href="mainframes.html" class="lk-nav-item">Mainframes</a>
+        <a href="ecosystem.html" class="lk-nav-item">Ansible ecosystem</a>
       </div>
     </nav>
     <div class="sidebar-footer">
@@ -116,7 +122,7 @@ ansible-runner  →  ansible-playbook  →  SSH  →  target host</code></pre>
         </ul>
 
         <div class="lk-note lk-note-info">
-          <strong>Parameter name collisions.</strong> Some module parameters collide with Python keywords (<code class="lk-code-inline">from</code>, <code class="lk-code-inline">type</code>) or with reserved slots (<code class="lk-code-inline">target</code>). The registration layer mangles those (e.g. <code class="lk-code-inline">type</code> → <code class="lk-code-inline">param_type</code>) and de-mangles on the way out. The mangled name is what the MCP schema exposes.
+          <div><strong>Parameter name collisions.</strong> Some module parameters collide with Python keywords (<code class="lk-code-inline">from</code>, <code class="lk-code-inline">type</code>) or with reserved slots (<code class="lk-code-inline">target</code>). The registration layer mangles those (e.g. <code class="lk-code-inline">type</code> → <code class="lk-code-inline">param_type</code>) and de-mangles on the way out. The mangled name is what the MCP schema exposes.</div>
         </div>
 
         <h2>Middleware stack</h2>
@@ -160,10 +166,10 @@ ansible-runner  →  ansible-playbook  →  SSH  →  target host</code></pre>
 
         <p>Two server tools handle recording:</p>
         <ul>
-          <li><code class="lk-code-inline">save_playbook(name, description, steps)</code> — writes a named playbook from explicit steps</li>
-          <li><code class="lk-code-inline">commit_session(name, description, since)</code> — materialises the current session's successful calls from the in-memory ring buffer</li>
+          <li><code class="lk-code-inline">save_playbook(name, description, steps)</code>: writes a named playbook from explicit steps</li>
+          <li><code class="lk-code-inline">commit_session(name, description, since)</code>: materialises the current session's successful calls from the in-memory ring buffer</li>
         </ul>
-        <p>On the next server start, saved playbooks are parsed back and registered as MCP prompts named <code class="lk-code-inline">playbook_&lt;name&gt;</code>. Hand-edited Ansible playbooks load the same way — any task whose module key is a registered tool becomes a step.</p>
+        <p>On the next server start, saved playbooks are parsed back and registered as MCP prompts named <code class="lk-code-inline">playbook_&lt;name&gt;</code>. Hand-edited Ansible playbooks load the same way; any task whose module key is a registered tool becomes a step.</p>
 
         <h2>The REPL</h2>
         <p>The REPL constructs the same FastMCP server as <code class="lk-code-inline">mcp serve</code> and drives it in-process via <code class="lk-code-inline">fastmcp.Client</code> without a JSON-RPC transport. The middleware stack, audit log, and run history all apply the same way.</p>

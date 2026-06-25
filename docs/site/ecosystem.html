@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="onyx">
+<head>
+  <meta charset="utf-8">
+  <script>(function(){var t=localStorage.getItem('lk-theme');if(t)document.documentElement.setAttribute('data-theme',t);}())</script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rocannon and the Ansible ecosystem — Rocannon</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/msradam/lokta-css@main/lokta.css">
+  <style>
+    .page-content { max-width: 820px; }
+    pre.lk-code { margin: 0.75rem 0; }
+    .lk-sidebar-brand { display: flex; align-items: center; gap: 0.6rem; }
+    .brand-logo { width: 28px; height: 28px; }
+    h2 { margin-top: 2.5rem; border-top: 1px solid var(--lk-border, #333); padding-top: 1.5rem; }
+    h2:first-of-type { border-top: none; padding-top: 0; }
+    [data-theme="paper"] .brand-logo { filter: brightness(0.55) saturate(0.7); }
+    .lk-sidebar { display: flex; flex-direction: column; justify-content: flex-start; min-height: 100vh; }
+    .sidebar-footer { margin-top: auto; padding: 0.75rem 1rem; border-top: 1px solid var(--lk-border, #333); }
+    .theme-btn { background: none; border: 1px solid var(--lk-border, #555); padding: 0.2rem 0.6rem; font-size: 0.7rem; cursor: pointer; color: inherit; font-family: inherit; }
+    .lk-nav-item { padding-top: 0.3rem !important; padding-bottom: 0.3rem !important; }
+    .lk-nav-section { margin-top: 1rem !important; }
+    .lk-note { display: block !important; }
+    .lk-note > div { display: block; }
+  </style>
+</head>
+<body class="lk lk-sheet">
+<div class="lk-shell">
+
+  <aside class="lk-sidebar">
+    <div class="lk-sidebar-brand">
+      <img src="../assets/gryphon.svg" alt="" class="brand-logo">
+      <strong>Rocannon</strong>
+      <span class="lk-tag">v0.1.4</span>
+    </div>
+    <nav>
+      <div class="lk-nav">
+        <span class="lk-nav-section">Getting Started</span>
+        <a href="index.html" class="lk-nav-item">Overview</a>
+        <a href="quickstart.html" class="lk-nav-item">Quickstart</a>
+        <span class="lk-nav-section">Reference</span>
+        <a href="profiles.html" class="lk-nav-item">Profiles</a>
+        <a href="cli.html" class="lk-nav-item">CLI</a>
+        <a href="clients.html" class="lk-nav-item">MCP Clients</a>
+        <span class="lk-nav-section">Concepts</span>
+        <a href="architecture.html" class="lk-nav-item">How it Works</a>
+        <a href="comparison.html" class="lk-nav-item">vs Dedicated MCP</a>
+        <a href="mainframes.html" class="lk-nav-item">Mainframes</a>
+        <a href="ecosystem.html" class="lk-nav-item" aria-current="page">Ansible ecosystem</a>
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="theme-btn" id="theme-btn" onclick="lkThemeToggle()">Light</button>
+    </div>
+  </aside>
+  <script>
+    function lkThemeToggle(){
+      var html = document.documentElement;
+      var next = html.getAttribute('data-theme') === 'onyx' ? 'paper' : 'onyx';
+      html.setAttribute('data-theme', next);
+      localStorage.setItem('lk-theme', next);
+      document.getElementById('theme-btn').textContent = next === 'onyx' ? 'Light' : 'Dark';
+    }
+    document.addEventListener('DOMContentLoaded', function(){
+      var btn = document.getElementById('theme-btn');
+      if (btn) btn.textContent = document.documentElement.getAttribute('data-theme') === 'onyx' ? 'Light' : 'Dark';
+    });
+  </script>
+
+  <main class="lk-main">
+    <div class="lk-content">
+      <div class="page-content">
+
+        <h1>Rocannon and the Ansible AI ecosystem</h1>
+        <p>Several AI-assisted Ansible tools exist. Rocannon doesn't compete with any of them. Each fills a different role at a different point in the automation lifecycle.</p>
+
+        <table class="lk-table" style="margin-bottom:2rem">
+          <thead>
+            <tr>
+              <th>Tool</th>
+              <th>What it does</th>
+              <th>Relationship to Rocannon</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Red Hat Ansible Lightspeed</td>
+              <td>Generates Ansible task suggestions and playbook drafts from natural language inside IDEs</td>
+              <td>Writes automation. Rocannon runs it interactively. The two chain together.</td>
+            </tr>
+            <tr>
+              <td>Ansible Automation Platform (AAP)</td>
+              <td>Enterprise job scheduling, approval workflows, RBAC, credential management</td>
+              <td>Runs automation at scale and on a schedule. Rocannon is for exploration and diagnosis before automation is formalized.</td>
+            </tr>
+            <tr>
+              <td>AAP MCP server</td>
+              <td>MCP server that triggers AAP job templates</td>
+              <td>Triggers predefined jobs. Rocannon exposes individual module tools. Both are MCP servers at different layers.</td>
+            </tr>
+            <tr>
+              <td>IBM Ansible Lightspeed for Z</td>
+              <td>Lightspeed variant tuned for IBM Z collections and z/OS-specific content</td>
+              <td>Generates z/OS Ansible content. Rocannon runs it against a real system.</td>
+            </tr>
+            <tr>
+              <td>IBM Watson Code Assistant for Z (WCA4Z)</td>
+              <td>AI for COBOL, PL/I, and application modernization on z/OS</td>
+              <td>Application layer. Rocannon is infrastructure layer. No overlap.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h2>Red Hat Ansible Lightspeed</h2>
+        <p>Lightspeed generates Ansible content: task suggestions, playbook drafts, and role templates from natural language inside VS Code and other supported editors. It writes automation; it doesn't run it against a live inventory.</p>
+        <p>The two tools chain naturally. Lightspeed generates candidate tasks for a given goal. Rocannon runs them against a real inventory to verify the result, with check mode to preview what would change before applying anything. Once a session works, <code class="lk-code-inline">commit_session</code> packages the successful steps into a standard playbook.</p>
+
+        <h2>Ansible Automation Platform (AAP)</h2>
+        <p>AAP is Red Hat's enterprise automation platform: job scheduling, approval gates, RBAC, credential vaulting, audit trails. It's built for production automation that runs on a schedule or gets triggered by a pipeline.</p>
+        <p>Rocannon's role is earlier in that workflow. You use it to explore, diagnose, and prototype. Once a session works reliably, <code class="lk-code-inline">commit_session</code> writes a standard <code class="lk-code-inline">ansible-playbook</code>-compatible YAML file. That file goes into AAP as a job template. Rocannon is not in the loop for subsequent runs.</p>
+
+        <h2>The AAP MCP server</h2>
+        <p>The open-source <code class="lk-code-inline">ansible/aap-mcp-server</code> lets MCP clients trigger AAP job templates. It's the right tool for "run job template X against inventory group Y" — it talks to AAP's API rather than to Ansible modules directly.</p>
+        <p>Both are MCP servers, but they operate at different layers. Rocannon exposes individual module-level tools against a live inventory. The AAP MCP server triggers predefined jobs registered in AAP. Running them side by side makes sense: use Rocannon to prototype and diagnose, then use the AAP MCP server to trigger the formalized job template from the same agent session.</p>
+
+        <div class="lk-note lk-note-info">
+          <div><strong>ansible/aap-mcp-server</strong> is a separate open-source project maintained by Red Hat. It is not bundled with or required by Rocannon.</div>
+        </div>
+
+        <h2>IBM Ansible Lightspeed for Z</h2>
+        <p>IBM's Lightspeed variant, tuned for IBM Z collections and z/OS-specific automation tasks. Like the Red Hat version, it generates Ansible content rather than executing it. Rocannon provides the execution layer for what it generates, with typed module tools against a real z/OS inventory.</p>
+
+        <h2>IBM Watson Code Assistant for Z (WCA4Z)</h2>
+        <p>WCA4Z targets the application layer: COBOL modernization, PL/I explanation, and application transformation for z/OS workloads. Rocannon targets the infrastructure layer: data set management, job submission, and system configuration through <code class="lk-code-inline">ibm.ibm_zos_core</code>. The two address different problems and don't overlap.</p>
+
+        <h2>The gap none of these fill</h2>
+        <p>None of the tools above let an LLM call an individual Ansible module against a live inventory as a typed MCP tool, see the structured result, and incorporate it into the next step of the same session. That's what Rocannon does: the interactive exploration and diagnosis layer, before automation gets committed to a formal pipeline.</p>
+        <p>The intended position in a mature setup: Lightspeed writes playbook drafts, Rocannon explores and verifies interactively, <code class="lk-code-inline">commit_session</code> promotes the working session to a playbook, AAP runs it at scale, and the AAP MCP server triggers it from agent sessions. These aren't competing positions in the stack.</p>
+
+      </div>
+    </div>
+  </main>
+
+</div>
+</body>
+</html>

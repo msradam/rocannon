@@ -23,6 +23,11 @@
     .lk-sidebar { display: flex; flex-direction: column; justify-content: flex-start; min-height: 100vh; }
     .sidebar-footer { margin-top: auto; padding: 0.75rem 1rem; border-top: 1px solid var(--lk-border, #333); }
     .theme-btn { background: none; border: 1px solid var(--lk-border, #555); padding: 0.2rem 0.6rem; font-size: 0.7rem; cursor: pointer; color: inherit; font-family: inherit; }
+    .lk-nav-item { padding-top: 0.3rem !important; padding-bottom: 0.3rem !important; }
+    .lk-nav-section { margin-top: 1rem !important; }
+    .lk-note { display: block !important; }
+    .lk-note > div { display: block; }
+    .lk-feature-title { font-size: 0.8rem !important; font-weight: 600 !important; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem; }
   </style>
 </head>
 <body class="lk lk-sheet">
@@ -46,6 +51,8 @@
         <span class="lk-nav-section">Concepts</span>
         <a href="site/architecture.html" class="lk-nav-item">How it Works</a>
         <a href="site/comparison.html" class="lk-nav-item">vs Dedicated MCP</a>
+        <a href="site/mainframes.html" class="lk-nav-item">Mainframes</a>
+        <a href="site/ecosystem.html" class="lk-nav-item">Ansible ecosystem</a>
       </div>
     </nav>
     <div class="sidebar-footer">
@@ -91,7 +98,7 @@ rocannon quickstart
         <div class="stat-row">
           <div class="lk-stat">
             <div class="lk-stat-label">Module coverage</div>
-            <div class="lk-stat-value">any installed</div>
+            <div class="lk-stat-value">1,000+</div>
           </div>
           <div class="lk-stat">
             <div class="lk-stat-label">MCP transports</div>
@@ -150,11 +157,11 @@ rocannon quickstart
           <tbody>
             <tr>
               <td><code class="lk-code-inline">ansible.builtin</code></td>
-              <td>Package, service, file, user, template — Linux essentials across distros</td>
+              <td>Package, service, file, user, template: Linux essentials across distros</td>
             </tr>
             <tr>
               <td><code class="lk-code-inline">amazon.aws</code></td>
-              <td>EC2, S3, RDS, VPC, IAM — plus OS-level configuration on the instances</td>
+              <td>EC2, S3, RDS, VPC, IAM, plus OS-level configuration on the instances</td>
             </tr>
             <tr>
               <td><code class="lk-code-inline">kubernetes.core</code></td>
@@ -162,7 +169,7 @@ rocannon quickstart
             </tr>
             <tr>
               <td><code class="lk-code-inline">community.docker</code></td>
-              <td>Containers, images, networks — and Docker Engine install on bare hosts</td>
+              <td>Containers, images, networks, and Docker Engine install on bare hosts</td>
             </tr>
             <tr>
               <td><code class="lk-code-inline">community.mongodb</code></td>
@@ -178,13 +185,13 @@ rocannon quickstart
             </tr>
             <tr>
               <td><code class="lk-code-inline">ibm.ibm_zos_core</code></td>
-              <td>z/OS data sets, jobs, USS — runs natively on LinuxONE</td>
+              <td>z/OS data sets, jobs, USS (runs natively on LinuxONE)</td>
             </tr>
           </tbody>
         </table>
 
         <div class="lk-note lk-note-info" style="margin-top:1.5rem">
-          <strong>OS-layer coverage.</strong> Dedicated MCP servers for MongoDB, AWS, and Kubernetes operate at the service API layer. Rocannon reaches the OS underneath. The same session that provisions infrastructure can configure the hosts. <a href="site/comparison.html" class="lk-link">See the full comparison →</a>
+          <div><strong>OS-layer coverage.</strong> Dedicated MCP servers for MongoDB, AWS, and Kubernetes operate at the service API layer. Rocannon reaches the OS underneath. The same session that provisions infrastructure can configure the hosts. <a href="site/comparison.html" class="lk-link">See the full comparison →</a></div>
         </div>
 
       </div>

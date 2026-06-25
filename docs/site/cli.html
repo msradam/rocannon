@@ -19,6 +19,8 @@
     .lk-sidebar { display: flex; flex-direction: column; justify-content: flex-start; min-height: 100vh; }
     .sidebar-footer { margin-top: auto; padding: 0.75rem 1rem; border-top: 1px solid var(--lk-border, #333); }
     .theme-btn { background: none; border: 1px solid var(--lk-border, #555); padding: 0.2rem 0.6rem; font-size: 0.7rem; cursor: pointer; color: inherit; font-family: inherit; }
+    .lk-nav-item { padding-top: 0.3rem !important; padding-bottom: 0.3rem !important; }
+    .lk-nav-section { margin-top: 1rem !important; }
   </style>
 </head>
 <body class="lk lk-sheet">
@@ -42,6 +44,8 @@
         <span class="lk-nav-section">Concepts</span>
         <a href="architecture.html" class="lk-nav-item">How it Works</a>
         <a href="comparison.html" class="lk-nav-item">vs Dedicated MCP</a>
+        <a href="mainframes.html" class="lk-nav-item">Mainframes</a>
+        <a href="ecosystem.html" class="lk-nav-item">Ansible ecosystem</a>
       </div>
     </nav>
     <div class="sidebar-footer">
@@ -89,8 +93,8 @@
           <thead><tr><th>Flag</th><th>Default</th><th>Description</th></tr></thead>
           <tbody>
             <tr><td><code class="lk-code-inline">--profile / -p</code></td><td>auto-discover</td><td>Profile path or name from <code class="lk-code-inline">.rocannon/profiles/</code></td></tr>
-            <tr><td><code class="lk-code-inline">--inventory / -i</code></td><td>—</td><td>Inventory file (repeatable). Alternative to --profile.</td></tr>
-            <tr><td><code class="lk-code-inline">--modules / -m</code></td><td>—</td><td>Module/collection/namespace spec (repeatable)</td></tr>
+            <tr><td><code class="lk-code-inline">--inventory / -i</code></td><td>none</td><td>Inventory file (repeatable). Alternative to --profile.</td></tr>
+            <tr><td><code class="lk-code-inline">--modules / -m</code></td><td>none</td><td>Module/collection/namespace spec (repeatable)</td></tr>
             <tr><td><code class="lk-code-inline">--transport</code></td><td><code class="lk-code-inline">stdio</code></td><td><code class="lk-code-inline">stdio</code> for MCP clients; <code class="lk-code-inline">http</code> for HTTP/SSE transport</td></tr>
             <tr><td><code class="lk-code-inline">--log-level</code></td><td><code class="lk-code-inline">INFO</code></td><td><code class="lk-code-inline">DEBUG</code> / <code class="lk-code-inline">INFO</code> / <code class="lk-code-inline">WARNING</code> / <code class="lk-code-inline">ERROR</code></td></tr>
           </tbody>

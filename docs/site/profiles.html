@@ -18,6 +18,10 @@
     .lk-sidebar { display: flex; flex-direction: column; justify-content: flex-start; min-height: 100vh; }
     .sidebar-footer { margin-top: auto; padding: 0.75rem 1rem; border-top: 1px solid var(--lk-border, #333); }
     .theme-btn { background: none; border: 1px solid var(--lk-border, #555); padding: 0.2rem 0.6rem; font-size: 0.7rem; cursor: pointer; color: inherit; font-family: inherit; }
+    .lk-nav-item { padding-top: 0.3rem !important; padding-bottom: 0.3rem !important; }
+    .lk-nav-section { margin-top: 1rem !important; }
+    .lk-note { display: block !important; }
+    .lk-note > div { display: block; }
   </style>
 </head>
 <body class="lk lk-sheet">
@@ -41,6 +45,8 @@
         <span class="lk-nav-section">Concepts</span>
         <a href="architecture.html" class="lk-nav-item">How it Works</a>
         <a href="comparison.html" class="lk-nav-item">vs Dedicated MCP</a>
+        <a href="mainframes.html" class="lk-nav-item">Mainframes</a>
+        <a href="ecosystem.html" class="lk-nav-item">Ansible ecosystem</a>
       </div>
     </nav>
     <div class="sidebar-footer">
@@ -98,7 +104,7 @@ timeouts:                          # optional; per-module execution timeout in s
   ansible.builtin.shell: 60</code></pre>
 
         <div class="lk-note lk-note-info" style="margin-top:1rem">
-          All file paths in a profile resolve <strong>relative to the profile file's directory</strong>, not the process CWD. This is what makes absolute-path invocations from MCP clients work correctly.
+          <div>All file paths in a profile resolve <strong>relative to the profile file's directory</strong>, not the process CWD. This is what makes absolute-path invocations from MCP clients work correctly.</div>
         </div>
 
         <h2>Configuration keys</h2>
@@ -124,7 +130,7 @@ timeouts:                          # optional; per-module execution timeout in s
             <tr>
               <td><code class="lk-code-inline">roles</code></td>
               <td><span class="lk-tag">optional</span></td>
-              <td>List of role names to expose. A collection role uses its FQCN (<code class="lk-code-inline">my_ns.my_coll.role</code>). A standalone role uses its directory name. Roles without <code class="lk-code-inline">meta/argument_specs.yml</code> are skipped — Rocannon cannot build a typed interface without a documented spec.</td>
+              <td>List of role names to expose. A collection role uses its FQCN (<code class="lk-code-inline">my_ns.my_coll.role</code>). A standalone role uses its directory name. Roles without <code class="lk-code-inline">meta/argument_specs.yml</code> are skipped (Rocannon cannot build a typed interface without a documented spec).</td>
             </tr>
             <tr>
               <td><code class="lk-code-inline">roles_path</code></td>
@@ -158,7 +164,7 @@ timeouts:                          # optional; per-module execution timeout in s
         <p>When you run <code class="lk-code-inline">rocannon mcp serve</code> without <code class="lk-code-inline">--profile</code>, Rocannon walks up from the current directory looking for <code class="lk-code-inline">.rocannon/profiles/</code>. If it finds the directory, it loads every <code class="lk-code-inline">*.yml</code> file in it as a named profile.</p>
         <p>Default profile resolution order:</p>
         <ol>
-          <li><code class="lk-code-inline">default.yml</code> as a symlink — the symlink target's stem becomes the active name</li>
+          <li><code class="lk-code-inline">default.yml</code> as a symlink; the symlink target's stem becomes the active name</li>
           <li><code class="lk-code-inline">default.yml</code> as a regular file</li>
           <li>The only profile in the directory, if exactly one exists</li>
           <li>Falls back to <code class="lk-code-inline">~/.rocannon/profiles/</code> if no project-level directory is found</li>
@@ -173,7 +179,7 @@ rocannon_use_profile       → switches to a named profile</code></pre>
         <p>Tool functions read the active profile's inventory, envvars, and timeouts on every call. A profile switch takes effect immediately for subsequent calls.</p>
 
         <div class="lk-note lk-note-info">
-          <strong>Union registration.</strong> Rocannon registers the union of every profile's modules at startup. Calling a module that isn't in the active profile returns a structured error pointing at <code class="lk-code-inline">rocannon_use_profile</code>, rather than failing inside <code class="lk-code-inline">ansible-runner</code>.
+          <div><strong>Union registration.</strong> Rocannon registers the union of every profile's modules at startup. Calling a module that isn't in the active profile returns a structured error pointing at <code class="lk-code-inline">rocannon_use_profile</code>, rather than failing inside <code class="lk-code-inline">ansible-runner</code>.</div>
         </div>
 
         <h2>Example: dev/staging/prod</h2>

@@ -18,6 +18,10 @@
     .lk-sidebar { display: flex; flex-direction: column; justify-content: flex-start; min-height: 100vh; }
     .sidebar-footer { margin-top: auto; padding: 0.75rem 1rem; border-top: 1px solid var(--lk-border, #333); }
     .theme-btn { background: none; border: 1px solid var(--lk-border, #555); padding: 0.2rem 0.6rem; font-size: 0.7rem; cursor: pointer; color: inherit; font-family: inherit; }
+    .lk-nav-item { padding-top: 0.3rem !important; padding-bottom: 0.3rem !important; }
+    .lk-nav-section { margin-top: 1rem !important; }
+    .lk-note { display: block !important; }
+    .lk-note > div { display: block; }
   </style>
 </head>
 <body class="lk lk-sheet">
@@ -41,6 +45,8 @@
         <span class="lk-nav-section">Concepts</span>
         <a href="architecture.html" class="lk-nav-item">How it Works</a>
         <a href="comparison.html" class="lk-nav-item" aria-current="page">vs Dedicated MCP</a>
+        <a href="mainframes.html" class="lk-nav-item">Mainframes</a>
+        <a href="ecosystem.html" class="lk-nav-item">Ansible ecosystem</a>
       </div>
     </nav>
     <div class="sidebar-footer">
@@ -66,10 +72,10 @@
       <div class="page-content">
 
         <h1>Rocannon vs dedicated MCP servers</h1>
-        <p>Most MCP servers operate at one layer: the service API. They can query MongoDB collections, describe EC2 instances, or list Kubernetes pods. None of them can touch the OS underneath. Rocannon operates at the OS and configuration layer — the same layer Ansible has owned for 15 years.</p>
+        <p>Most MCP servers operate at one layer: the service API. They can query MongoDB collections, describe EC2 instances, or list Kubernetes pods. None of them can touch the OS underneath. Rocannon operates at the OS and configuration layer, the same layer Ansible has owned for 15 years.</p>
 
         <div class="lk-note lk-note-info" style="margin-bottom:2rem">
-          <strong>These are not competing tools.</strong> Run a MongoDB MCP server alongside Rocannon: MongoDB MCP for document queries and Atlas management, Rocannon for <code class="lk-code-inline">mongod</code> installation and OS configuration. Each does what the other cannot.
+          <div><strong>These are not competing tools.</strong> Run a MongoDB MCP server alongside Rocannon: MongoDB MCP for document queries and Atlas management, Rocannon for <code class="lk-code-inline">mongod</code> installation and OS configuration. Each does what the other cannot.</div>
         </div>
 
         <h2>Collection-by-collection comparison</h2>
@@ -86,7 +92,7 @@
             <tr>
               <td><code class="lk-code-inline">amazon.aws</code></td>
               <td>AWS MCP (awslabs, official)</td>
-              <td>OS-level config on EC2 — packages, users, services, files; cross-cloud plays; Vault-sourced credentials</td>
+              <td>OS-level config on EC2: packages, users, services, files; cross-cloud plays; Vault-sourced credentials</td>
               <td>CloudWatch log correlation, cost analysis, IAM-governed access, interactive resource discovery</td>
             </tr>
             <tr>
@@ -147,7 +153,7 @@
               <td><code class="lk-code-inline">ansible.builtin</code> / <code class="lk-code-inline">ansible.posix</code></td>
               <td><em>No official MCP server</em> (community SSH servers only)</td>
               <td>Idempotent package/service/file/user management; distro-abstracted (apt/yum/dnf); check mode; no raw shell required</td>
-              <td>Bare imperative shell (community SSH servers — no idempotency)</td>
+              <td>Bare imperative shell (community SSH servers, no idempotency)</td>
             </tr>
           </tbody>
         </table>
@@ -157,7 +163,7 @@
           <thead><tr><th>Situation</th><th>Reach for</th></tr></thead>
           <tbody>
             <tr>
-              <td>Diagnose a live host, gather facts, apply a targeted fix — all in one conversation</td>
+              <td>Diagnose a live host, gather facts, apply a targeted fix, all in one conversation</td>
               <td><strong>Rocannon</strong></td>
             </tr>
             <tr>
@@ -173,7 +179,7 @@
               <td><strong>AAP MCP server</strong> (<code class="lk-code-inline">ansible/aap-mcp-server</code>)</td>
             </tr>
             <tr>
-              <td>You only need a shell — no module library, no idempotency</td>
+              <td>You only need a shell, with no module library or idempotency</td>
               <td><strong>SSH MCP server</strong></td>
             </tr>
             <tr>
@@ -181,18 +187,18 @@
               <td><strong>Rocannon + MongoDB MCP server</strong> side by side</td>
             </tr>
             <tr>
-              <td>Self-managed PostgreSQL or MySQL — no official MCP server exists</td>
-              <td><strong>Rocannon</strong> — the only MCP option here</td>
+              <td>Self-managed PostgreSQL or MySQL (no official MCP server exists)</td>
+              <td><strong>Rocannon</strong>, the only MCP option here</td>
             </tr>
             <tr>
-              <td>Network device config (Cisco, Arista, Juniper) — MCP coverage is thin</td>
+              <td>Network device config (Cisco, Arista, Juniper), where MCP coverage is thin</td>
               <td><strong>Rocannon</strong> with <code class="lk-code-inline">cisco.ios</code>, <code class="lk-code-inline">arista.eos</code>, <code class="lk-code-inline">junipernetworks.junos</code></td>
             </tr>
           </tbody>
         </table>
 
         <h2>Why not just use an SSH MCP server?</h2>
-        <p>SSH MCP gives you a shell. Rocannon gives you Ansible modules — <code class="lk-code-inline">ansible.builtin.copy</code>, <code class="lk-code-inline">community.crypto.x509_certificate</code>, <code class="lk-code-inline">kubernetes.core.k8s</code> — typed, idempotent, with check mode and diff. The LLM gets a tool that declares what it does and what it changes, not a raw shell that could do anything.</p>
+        <p>SSH MCP gives you a shell. Rocannon gives you Ansible modules: <code class="lk-code-inline">ansible.builtin.copy</code>, <code class="lk-code-inline">community.crypto.x509_certificate</code>, <code class="lk-code-inline">kubernetes.core.k8s</code>. They're typed, idempotent, with check mode and diff. The LLM gets a tool that declares what it does and what it changes, not a raw shell that could do anything.</p>
 
         <h2>Why not just write a playbook?</h2>
         <p>You should, eventually. Rocannon's <code class="lk-code-inline">commit_session</code> tool turns a successful conversation into a standard Ansible playbook that runs with <code class="lk-code-inline">ansible-playbook</code> and no Rocannon in the loop. The workflow is: explore and fix with Rocannon, then commit for the next time it needs to be repeatable.</p>
@@ -203,7 +209,7 @@
           <li>Approval gates and change-management pipelines</li>
           <li>Compliance drift enforcement via scheduled runs</li>
           <li>Versioned roles and collections as reusable automation packages</li>
-          <li>CI/CD integration — triggerable by pipelines, not conversational agents</li>
+          <li>CI/CD integration, triggerable by pipelines, not conversational agents</li>
         </ul>
         <p>Rocannon is a conversation partner and exploration tool. When a task needs to be repeatable, auditable, and pipeline-triggerable, commit it to a playbook.</p>
 

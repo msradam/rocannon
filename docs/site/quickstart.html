@@ -21,6 +21,10 @@
     .lk-sidebar { display: flex; flex-direction: column; justify-content: flex-start; min-height: 100vh; }
     .sidebar-footer { margin-top: auto; padding: 0.75rem 1rem; border-top: 1px solid var(--lk-border, #333); }
     .theme-btn { background: none; border: 1px solid var(--lk-border, #555); padding: 0.2rem 0.6rem; font-size: 0.7rem; cursor: pointer; color: inherit; font-family: inherit; }
+    .lk-nav-item { padding-top: 0.3rem !important; padding-bottom: 0.3rem !important; }
+    .lk-nav-section { margin-top: 1rem !important; }
+    .lk-note { display: block !important; }
+    .lk-note > div { display: block; }
   </style>
 </head>
 <body class="lk lk-sheet">
@@ -44,6 +48,8 @@
         <span class="lk-nav-section">Concepts</span>
         <a href="architecture.html" class="lk-nav-item">How it Works</a>
         <a href="comparison.html" class="lk-nav-item">vs Dedicated MCP</a>
+        <a href="mainframes.html" class="lk-nav-item">Mainframes</a>
+        <a href="ecosystem.html" class="lk-nav-item">Ansible ecosystem</a>
       </div>
     </nav>
     <div class="sidebar-footer">
@@ -72,7 +78,7 @@
         <p>From zero to a working Ansible-backed MCP tool in three steps. This guide uses localhost; the same steps apply to any remote host by editing the inventory.</p>
 
         <div class="lk-note lk-note-info">
-          <strong>Prerequisites:</strong> Python 3.12+, and SSH access to the hosts you want to automate (localhost works out of the box via the local connection).
+          <div><strong>Prerequisites:</strong> Python 3.12+, and SSH access to the hosts you want to automate (localhost works out of the box via the local connection).</div>
         </div>
 
         <div class="step">
@@ -146,7 +152,7 @@
         <pre class="lk-code"><code>rocannon repl --profile .rocannon/quickstart.yml</code></pre>
         <pre class="lk-code"><code>rocannon> setup target=localhost
 rocannon> .save my-first-session "gather facts from localhost"</code></pre>
-        <p>The <code class="lk-code-inline">.save</code> command writes the session to <code class="lk-code-inline">.rocannon/playbooks/my-first-session.yml</code> — a standard Ansible playbook that runs without Rocannon.</p>
+        <p>The <code class="lk-code-inline">.save</code> command writes the session to <code class="lk-code-inline">.rocannon/playbooks/my-first-session.yml</code>, a standard Ansible playbook that runs without Rocannon.</p>
 
         <hr class="lk-rule">
 

@@ -10,7 +10,7 @@
     .hero { padding: 3rem 0 2rem; max-width: 740px; }
     .hero h1 { font-size: 2.25rem; line-height: 1.15; margin-bottom: 1rem; }
     .hero p { opacity: 0.8; margin-bottom: 1.5rem; max-width: 580px; line-height: 1.65; }
-    .stat-row { display: flex; gap: 2rem; margin: 2rem 0; flex-wrap: wrap; }
+    .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin: 2rem 0; }
     .feature-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; margin: 2rem 0; }
     .demo-img { width: 100%; max-width: 740px; border-radius: 4px; margin: 1.5rem 0; display: block; }
     .page-content { max-width: 860px; }
@@ -20,7 +20,7 @@
     .hero-logo { width: 96px; height: 96px; display: block; margin-bottom: 1.5rem; }
     [data-theme="paper"] .brand-logo,
     [data-theme="paper"] .hero-logo { filter: brightness(0.55) saturate(0.7); }
-    .lk-sidebar { display: flex; flex-direction: column; min-height: 100vh; }
+    .lk-sidebar { display: flex; flex-direction: column; justify-content: flex-start; min-height: 100vh; }
     .sidebar-footer { margin-top: auto; padding: 0.75rem 1rem; border-top: 1px solid var(--lk-border, #333); }
     .theme-btn { background: none; border: 1px solid var(--lk-border, #555); padding: 0.2rem 0.6rem; font-size: 0.7rem; cursor: pointer; color: inherit; font-family: inherit; }
   </style>
@@ -73,7 +73,8 @@
         <div class="hero">
           <img src="./assets/gryphon.svg" alt="Rocannon" class="hero-logo">
           <span class="lk-label">Open source · MIT · Python 3.12+</span>
-          <h1>Every Ansible module as a typed MCP tool.</h1>
+          <h1>Rocannon</h1>
+          <p style="font-size:1.15rem; opacity:0.75; margin-bottom:0.5rem">Every Ansible module as a typed MCP tool.</p>
           <p>Rocannon runs on your Ansible control node. At startup it reads <code class="lk-code-inline">ansible-doc</code> and registers every installed module and role as a typed MCP tool. Claude Code, Cursor, or any MCP client can then drive your real infrastructure with typed, idempotent Ansible primitives.</p>
           <div style="display:flex; gap:0.5rem; flex-wrap:wrap">
             <a href="site/quickstart.html" class="lk-btn lk-btn-primary lk-btn-lg">Get started →</a>
@@ -89,27 +90,22 @@ rocannon quickstart
 
         <div class="stat-row">
           <div class="lk-stat">
-            <div class="lk-stat-label">ansible.builtin modules</div>
-            <div class="lk-stat-value">71</div>
-          </div>
-          <div class="lk-stat">
-            <div class="lk-stat-label">Config per new module</div>
-            <div class="lk-stat-value">zero</div>
+            <div class="lk-stat-label">Module coverage</div>
+            <div class="lk-stat-value">any installed</div>
           </div>
           <div class="lk-stat">
             <div class="lk-stat-label">MCP transports</div>
             <div class="lk-stat-value">stdio · http</div>
           </div>
           <div class="lk-stat">
+            <div class="lk-stat-label">Playbook export</div>
+            <div class="lk-stat-value">standard YAML</div>
+          </div>
+          <div class="lk-stat">
             <div class="lk-stat-label">License</div>
             <div class="lk-stat-value">MIT</div>
           </div>
         </div>
-
-        <p style="opacity:0.65; font-size:0.875rem; margin-top:-1rem">
-          Add <code class="lk-code-inline">community.general</code> and the count grows by 582 more.
-          Every collection you install expands the tool set automatically.
-        </p>
 
         <hr class="lk-rule">
 

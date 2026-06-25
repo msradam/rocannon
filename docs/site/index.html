@@ -11,7 +11,7 @@
     .hero h1 { font-size: 2.25rem; line-height: 1.15; max-width: 640px; margin-bottom: 1rem; }
     .hero p { max-width: 560px; opacity: 0.8; margin-bottom: 1.5rem; }
     .feature-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; margin: 2rem 0; }
-    .stat-row { display: flex; gap: 2rem; margin: 2rem 0; flex-wrap: wrap; }
+    .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin: 2rem 0; }
     .page-content { max-width: 860px; }
     pre.lk-code { margin: 0.75rem 0; }
     .lk-sidebar-brand { display: flex; align-items: center; gap: 0.6rem; }
@@ -19,7 +19,7 @@
     .hero-logo { width: 96px; height: 96px; display: block; margin-bottom: 1.5rem; }
     [data-theme="paper"] .brand-logo,
     [data-theme="paper"] .hero-logo { filter: brightness(0.55) saturate(0.7); }
-    .lk-sidebar { display: flex; flex-direction: column; min-height: 100vh; }
+    .lk-sidebar { display: flex; flex-direction: column; justify-content: flex-start; min-height: 100vh; }
     .sidebar-footer { margin-top: auto; padding: 0.75rem 1rem; border-top: 1px solid var(--lk-border, #333); }
     .theme-btn { background: none; border: 1px solid var(--lk-border, #555); padding: 0.2rem 0.6rem; font-size: 0.7rem; cursor: pointer; color: inherit; font-family: inherit; }
   </style>
@@ -72,7 +72,8 @@
         <div class="hero">
           <img src="../assets/gryphon.svg" alt="Rocannon" class="hero-logo">
           <span class="lk-label">Open source · MIT · Python 3.12+</span>
-          <h1>Every Ansible module as a typed MCP tool.</h1>
+          <h1>Rocannon</h1>
+          <p style="font-size:1.15rem; opacity:0.75; margin-bottom:0.5rem">Every Ansible module as a typed MCP tool.</p>
           <p>Rocannon runs on your Ansible control node and exposes every installed module and role as a typed MCP tool. Any MCP client can then drive real infrastructure with standard Ansible primitives.</p>
 
           <pre class="lk-code"><code>pip install rocannon
@@ -87,11 +88,11 @@ rocannon quickstart
 
           <div class="stat-row">
             <div class="lk-stat">
-              <div class="lk-stat-label">Check mode</div>
-              <div class="lk-stat-value">built-in</div>
+              <div class="lk-stat-label">Module coverage</div>
+              <div class="lk-stat-value">any installed</div>
             </div>
             <div class="lk-stat">
-              <div class="lk-stat-label">Transports</div>
+              <div class="lk-stat-label">MCP transports</div>
               <div class="lk-stat-value">stdio · http</div>
             </div>
             <div class="lk-stat">

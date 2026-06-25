@@ -119,7 +119,7 @@
         <p>Rocannon's role is earlier in that workflow. You use it to explore, diagnose, and prototype. Once a session works reliably, <code class="lk-code-inline">commit_session</code> writes a standard <code class="lk-code-inline">ansible-playbook</code>-compatible YAML file. That file goes into AAP as a job template. Rocannon is not in the loop for subsequent runs.</p>
 
         <h2>The AAP MCP server</h2>
-        <p>The open-source <code class="lk-code-inline">ansible/aap-mcp-server</code> lets MCP clients trigger AAP job templates. It's the right tool for "run job template X against inventory group Y" — it talks to AAP's API rather than to Ansible modules directly.</p>
+        <p>The open-source <code class="lk-code-inline">ansible/aap-mcp-server</code> lets MCP clients trigger AAP job templates. It's the right tool for "run job template X against inventory group Y"; it talks to AAP's API rather than to Ansible modules directly.</p>
         <p>Both are MCP servers, but they operate at different layers. Rocannon exposes individual module-level tools against a live inventory. The AAP MCP server triggers predefined jobs registered in AAP. Running them side by side makes sense: use Rocannon to prototype and diagnose, then use the AAP MCP server to trigger the formalized job template from the same agent session.</p>
 
         <div class="lk-note lk-note-info">

@@ -74,7 +74,7 @@
         <p>Rocannon started with IBM z/OS. The creator (Adam) works on IBM Z software. Browsing the <code class="lk-code-inline">ibm.ibm_zos_core</code> module catalog through <code class="lk-code-inline">ansible-doc</code> is what made the idea of turning every Ansible module into a typed MCP tool feel worth building. The collection has one of the richest, most consistently documented parameter surfaces in the entire Ansible ecosystem. It was a natural fit.</p>
 
         <h2>Why z/OS has been underserved by AI tooling</h2>
-        <p>Configuration management and conversational AI tools tend to assume POSIX systems. z/OS is POSIX-capable through USS, but its native interfaces — SYSFS, JES, the operator console, VSAM, SMS-managed data sets — have no parallel in Linux abstractions. Tools designed for Linux either break or simply don't exist for z/OS.</p>
+        <p>Configuration management and conversational AI tools tend to assume POSIX systems. z/OS is POSIX-capable through USS, but its native interfaces (SYSFS, JES, the operator console, VSAM, SMS-managed data sets) have no parallel in Linux abstractions. Tools designed for Linux either break or simply don't exist for z/OS.</p>
         <p>Ansible changed the automation story. The IBM z/OS collections provide idempotent, typed interfaces for everything from job submission to data set management to HMC operations. Rocannon adds an MCP layer on top of that investment, so any LLM can call those modules against a real z/OS system.</p>
 
         <h2>IBM z/OS collections Rocannon supports</h2>

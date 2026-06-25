@@ -27,6 +27,9 @@
     .lk-note { display: block !important; }
     .lk-note > div { display: block; }
     .lk-feature-title { font-size: 0.8rem !important; font-weight: 600 !important; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem; }
+    .lk-stat-value { font-size: 1.4rem !important; font-weight: 700; line-height: 1.3; }
+    .lk-sidebar-brand { padding-right: 0.75rem; }
+    .stat-row { grid-template-columns: repeat(3, 1fr) !important; }
   </style>
 </head>
 <body class="lk lk-sheet">
@@ -83,9 +86,17 @@
           <p style="font-size:1.15rem; opacity:0.75; margin-bottom:0.5rem">Every Ansible module as a typed MCP tool.</p>
           <p>Rocannon runs on your Ansible control node and exposes every installed module and role as a typed MCP tool. Any MCP client can then drive real infrastructure with standard Ansible primitives.</p>
 
-          <pre class="lk-code"><code>pip install rocannon
-rocannon quickstart
-# → scaffolds a localhost profile, prints MCP client wiring</code></pre>
+          <pre class="lk-code"><code># Claude Code: "nginx is down on webservers, find out why and fix it"
+
+ansible_builtin_service_info(target="webservers", name="nginx")
+# → state: failed
+
+ansible_builtin_command(target="webservers", cmd="journalctl -u nginx -n 5 --no-pager")
+# → nginx: bind() to 0.0.0.0:80 failed: address already in use
+
+ansible_builtin_service(target="webservers", name="apache2", state="stopped")
+ansible_builtin_service(target="webservers", name="nginx", state="restarted")
+# → changed: true on 3 hosts</code></pre>
 
           <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:1.25rem">
 
@@ -101,10 +112,6 @@ rocannon quickstart
             <div class="lk-stat">
               <div class="lk-stat-label">MCP transports</div>
               <div class="lk-stat-value">stdio · http</div>
-            </div>
-            <div class="lk-stat">
-              <div class="lk-stat-label">Playbook export</div>
-              <div class="lk-stat-value">standard YAML</div>
             </div>
             <div class="lk-stat">
               <div class="lk-stat-label">License</div>

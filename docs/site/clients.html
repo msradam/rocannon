@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="onyx">
+<head>
+  <meta charset="utf-8">
+  <script>(function(){var t=localStorage.getItem('lk-theme');if(t)document.documentElement.setAttribute('data-theme',t);}())</script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MCP Clients — Rocannon</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/msradam/lokta-css@main/lokta.css">
+  <style>
+    .page-content { max-width: 800px; }
+    pre.lk-code { margin: 0.75rem 0; }
+    .lk-sidebar-brand { display: flex; align-items: center; gap: 0.6rem; }
+    .brand-logo { width: 28px; height: 28px; }
+    h2 { margin-top: 2.5rem; }
+    [data-theme="paper"] .brand-logo { filter: brightness(0.55) saturate(0.7); }
+    .lk-sidebar { display: flex; flex-direction: column; min-height: 100vh; }
+    .sidebar-footer { margin-top: auto; padding: 0.75rem 1rem; border-top: 1px solid var(--lk-border, #333); }
+    .theme-btn { background: none; border: 1px solid var(--lk-border, #555); padding: 0.2rem 0.6rem; font-size: 0.7rem; cursor: pointer; color: inherit; font-family: inherit; }
+  </style>
+</head>
+<body class="lk lk-sheet">
+<div class="lk-shell">
+
+  <aside class="lk-sidebar">
+    <div class="lk-sidebar-brand">
+      <img src="../assets/gryphon.svg" alt="" class="brand-logo">
+      <strong>Rocannon</strong>
+      <span class="lk-tag">v0.1.4</span>
+    </div>
+    <nav>
+      <div class="lk-nav">
+        <span class="lk-nav-section">Getting Started</span>
+        <a href="index.html" class="lk-nav-item">Overview</a>
+        <a href="quickstart.html" class="lk-nav-item">Quickstart</a>
+        <span class="lk-nav-section">Reference</span>
+        <a href="profiles.html" class="lk-nav-item">Profiles</a>
+        <a href="cli.html" class="lk-nav-item">CLI</a>
+        <a href="clients.html" class="lk-nav-item" aria-current="page">MCP Clients</a>
+        <span class="lk-nav-section">Concepts</span>
+        <a href="architecture.html" class="lk-nav-item">How it Works</a>
+        <a href="comparison.html" class="lk-nav-item">vs Dedicated MCP</a>
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="theme-btn" id="theme-btn" onclick="lkThemeToggle()">Light</button>
+    </div>
+  </aside>
+  <script>
+    function lkThemeToggle(){
+      var html = document.documentElement;
+      var next = html.getAttribute('data-theme') === 'onyx' ? 'paper' : 'onyx';
+      html.setAttribute('data-theme', next);
+      localStorage.setItem('lk-theme', next);
+      document.getElementById('theme-btn').textContent = next === 'onyx' ? 'Light' : 'Dark';
+    }
+    document.addEventListener('DOMContentLoaded', function(){
+      var btn = document.getElementById('theme-btn');
+      if (btn) btn.textContent = document.documentElement.getAttribute('data-theme') === 'onyx' ? 'Light' : 'Dark';
+    });
+  </script>
+
+  <main class="lk-main">
+    <div class="lk-content">
+      <div class="page-content">
+
+        <h1>MCP Clients</h1>
+        <p>Rocannon works with any MCP client. All use the same command: <code class="lk-code-inline">rocannon mcp serve --profile &lt;path&gt;</code>. Use an absolute path — clients spawn the server from their own working directory, not yours.</p>
+
+        <table class="lk-table" style="margin-bottom:2rem">
+          <thead>
+            <tr><th>Client</th><th>Config location</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Claude Code</td><td><code class="lk-code-inline">.mcp.json</code> at project root, or <code class="lk-code-inline">claude mcp add</code></td></tr>
+            <tr><td>Claude Desktop</td><td>macOS: <code class="lk-code-inline">~/Library/Application Support/Claude/claude_desktop_config.json</code></td></tr>
+            <tr><td>Cursor</td><td><code class="lk-code-inline">.cursor/mcp.json</code> or <code class="lk-code-inline">~/.cursor/mcp.json</code></td></tr>
+            <tr><td>mcphost</td><td><code class="lk-code-inline">~/.mcphost.yml</code> or <code class="lk-code-inline">--config &lt;path&gt;</code></td></tr>
+            <tr><td>IBM Bob</td><td><code class="lk-code-inline">.bob/mcp.json</code> or <code class="lk-code-inline">~/.bob/mcp_settings.json</code></td></tr>
+          </tbody>
+        </table>
+
+        <h2>Claude Code</h2>
+        <p>One-shot setup via the CLI:</p>
+        <pre class="lk-code"><code>claude mcp add rocannon -- rocannon mcp serve --profile /absolute/path/to/profile.yml</code></pre>
+        <p>Or add to <code class="lk-code-inline">.mcp.json</code> at your project root:</p>
+        <pre class="lk-code"><code>{
+  "mcpServers": {
+    "rocannon": {
+      "command": "rocannon",
+      "args": ["mcp", "serve", "--profile", "/absolute/path/to/profile.yml"],
+      "env": {
+        "ROCANNON_LOG_FORMAT": "json"
+      }
+    }
+  }
+}</code></pre>
+        <p>Verify the connection:</p>
+        <pre class="lk-code"><code>claude mcp get rocannon</code></pre>
+
+        <h2>Claude Desktop</h2>
+        <pre class="lk-code"><code>{
+  "mcpServers": {
+    "rocannon": {
+      "command": "rocannon",
+      "args": ["mcp", "serve", "--profile", "/absolute/path/to/profile.yml"]
+    }
+  }
+}</code></pre>
+        <p>Restart Claude Desktop after editing the config.</p>
+
+        <h2>Cursor</h2>
+        <pre class="lk-code"><code>{
+  "mcpServers": {
+    "rocannon": {
+      "command": "rocannon",
+      "args": ["mcp", "serve", "--profile", "/absolute/path/to/profile.yml"]
+    }
+  }
+}</code></pre>
+
+        <h2>mcphost</h2>
+        <pre class="lk-code"><code>servers:
+  rocannon:
+    command: rocannon
+    args:
+      - mcp
+      - serve
+      - --profile
+      - /absolute/path/to/profile.yml</code></pre>
+        <div class="lk-note lk-note-info">
+          <strong>mcphost env field.</strong> mcphost ignores the <code class="lk-code-inline">env</code> field in its config. To pass environment variables, use the <code class="lk-code-inline">command: env</code> workaround:
+          <pre class="lk-code" style="margin-top:0.5rem"><code>servers:
+  rocannon:
+    command: env
+    args:
+      - ROCANNON_TIMEOUT=120
+      - rocannon
+      - mcp
+      - serve
+      - --profile
+      - /absolute/path/to/profile.yml</code></pre>
+        </div>
+
+        <h2>IBM Bob</h2>
+        <pre class="lk-code"><code>{
+  "mcpServers": {
+    "rocannon": {
+      "command": "rocannon",
+      "args": ["mcp", "serve", "--profile", "/absolute/path/to/profile.yml"],
+      "alwaysAllow": [
+        "ansible_builtin_ping",
+        "ansible_builtin_setup"
+      ]
+    }
+  }
+}</code></pre>
+        <p>The <code class="lk-code-inline">alwaysAllow</code> field pre-approves specific tools so Bob does not prompt on every safe read-only call.</p>
+
+        <h2>HTTP transport</h2>
+        <p>For long-lived sessions or multi-client scenarios, run Rocannon over HTTP instead of stdio:</p>
+        <pre class="lk-code"><code>rocannon mcp serve --profile profile.yml --transport http</code></pre>
+        <p>The server starts on port 8000 by default (configurable via FastMCP's standard env vars). HTTP transport enables the Ping middleware and suits containerised deployments. A working <code class="lk-code-inline">deploy/rocannon.service</code> systemd unit is included in the repo.</p>
+
+        <h2>Running as a service</h2>
+        <pre class="lk-code"><code>[Unit]
+Description=Rocannon MCP Server
+After=network.target
+
+[Service]
+ExecStart=rocannon mcp serve --profile /etc/rocannon/profile.yml --transport http
+Environment=ROCANNON_LOG_FORMAT=json
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+        <p>See <code class="lk-code-inline">deploy/rocannon.service</code> in the repo for the full unit file.</p>
+
+        <h2>Verifying the connection</h2>
+        <p>Check tool count from the project root after wiring any client:</p>
+        <pre class="lk-code"><code>rocannon mcp doctor --profile profile.yml</code></pre>
+        <p>Or from the health endpoint when running in HTTP mode:</p>
+        <pre class="lk-code"><code>curl http://localhost:8000/health</code></pre>
+        <pre class="lk-code"><code>{
+  "status": "ok",
+  "tools": 142,
+  "hosts": 8,
+  "groups": 3,
+  "profiles": ["dev", "staging", "prod"],
+  "active_profile": "dev"
+}</code></pre>
+
+        <h2>MCP resources</h2>
+        <p>Rocannon exposes several read-only resources alongside the tools:</p>
+        <table class="lk-table">
+          <thead><tr><th>Resource URI</th><th>Contents</th></tr></thead>
+          <tbody>
+            <tr><td><code class="lk-code-inline">rocannon://inventory</code></td><td>Hosts and groups for the active profile</td></tr>
+            <tr><td><code class="lk-code-inline">rocannon://module/{fqcn}</code></td><td>Parsed schema for a registered module</td></tr>
+            <tr><td><code class="lk-code-inline">rocannon://collections</code></td><td>Collections exposed and their module lists</td></tr>
+            <tr><td><code class="lk-code-inline">rocannon://profiles</code></td><td>All loaded profiles and which is active</td></tr>
+            <tr><td><code class="lk-code-inline">rocannon://playbooks</code></td><td>Saved playbooks (name, description, step count)</td></tr>
+            <tr><td><code class="lk-code-inline">rocannon://runs</code></td><td>Recent tool call records (last 50)</td></tr>
+            <tr><td><code class="lk-code-inline">rocannon://runs/{request_id}</code></td><td>Full record for a single call by ID</td></tr>
+          </tbody>
+        </table>
+
+      </div>
+    </div>
+  </main>
+
+</div>
+</body>
+</html>

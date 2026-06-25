@@ -7,12 +7,11 @@
   <title>Rocannon — Every Ansible module as a typed MCP tool</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/msradam/lokta-css@main/lokta.css">
   <style>
-    .hero { padding: 3rem 0 2rem; max-width: 740px; }
-    .hero h1 { font-size: 2.25rem; line-height: 1.15; margin-bottom: 1rem; }
-    .hero p { opacity: 0.8; margin-bottom: 1.5rem; max-width: 580px; line-height: 1.65; }
-    .stat-row { display: flex; gap: 2rem; margin: 2rem 0; flex-wrap: wrap; }
+    .hero { padding: 3rem 0 2rem; }
+    .hero h1 { font-size: 2.25rem; line-height: 1.15; max-width: 640px; margin-bottom: 1rem; }
+    .hero p { max-width: 560px; opacity: 0.8; margin-bottom: 1.5rem; }
     .feature-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; margin: 2rem 0; }
-    .demo-img { width: 100%; max-width: 740px; border-radius: 4px; margin: 1.5rem 0; display: block; }
+    .stat-row { display: flex; gap: 2rem; margin: 2rem 0; flex-wrap: wrap; }
     .page-content { max-width: 860px; }
     pre.lk-code { margin: 0.75rem 0; }
     .lk-sidebar-brand { display: flex; align-items: center; gap: 0.6rem; }
@@ -30,7 +29,7 @@
 
   <aside class="lk-sidebar">
     <div class="lk-sidebar-brand">
-      <img src="./assets/gryphon.svg" alt="" class="brand-logo">
+      <img src="../assets/gryphon.svg" alt="" class="brand-logo">
       <strong>Rocannon</strong>
       <span class="lk-tag">v0.1.4</span>
     </div>
@@ -38,14 +37,14 @@
       <div class="lk-nav">
         <span class="lk-nav-section">Getting Started</span>
         <a href="index.html" class="lk-nav-item" aria-current="page">Overview</a>
-        <a href="site/quickstart.html" class="lk-nav-item">Quickstart</a>
+        <a href="quickstart.html" class="lk-nav-item">Quickstart</a>
         <span class="lk-nav-section">Reference</span>
-        <a href="site/profiles.html" class="lk-nav-item">Profiles</a>
-        <a href="site/cli.html" class="lk-nav-item">CLI</a>
-        <a href="site/clients.html" class="lk-nav-item">MCP Clients</a>
+        <a href="profiles.html" class="lk-nav-item">Profiles</a>
+        <a href="cli.html" class="lk-nav-item">CLI</a>
+        <a href="clients.html" class="lk-nav-item">MCP Clients</a>
         <span class="lk-nav-section">Concepts</span>
-        <a href="site/architecture.html" class="lk-nav-item">How it Works</a>
-        <a href="site/comparison.html" class="lk-nav-item">vs Dedicated MCP</a>
+        <a href="architecture.html" class="lk-nav-item">How it Works</a>
+        <a href="comparison.html" class="lk-nav-item">vs Dedicated MCP</a>
       </div>
     </nav>
     <div class="sidebar-footer">
@@ -71,45 +70,40 @@
       <div class="page-content">
 
         <div class="hero">
-          <img src="./assets/gryphon.svg" alt="Rocannon" class="hero-logo">
+          <img src="../assets/gryphon.svg" alt="Rocannon" class="hero-logo">
           <span class="lk-label">Open source · MIT · Python 3.12+</span>
           <h1>Every Ansible module as a typed MCP tool.</h1>
-          <p>Rocannon runs on your Ansible control node. At startup it reads <code class="lk-code-inline">ansible-doc</code> and registers every installed module and role as a typed MCP tool. Claude Code, Cursor, or any MCP client can then drive your real infrastructure with typed, idempotent Ansible primitives.</p>
-          <div style="display:flex; gap:0.5rem; flex-wrap:wrap">
-            <a href="site/quickstart.html" class="lk-btn lk-btn-primary lk-btn-lg">Get started →</a>
-            <a href="https://github.com/msradam/rocannon" class="lk-btn lk-btn-lg">GitHub</a>
-          </div>
-        </div>
+          <p>Rocannon runs on your Ansible control node and exposes every installed module and role as a typed MCP tool. Any MCP client can then drive real infrastructure with standard Ansible primitives.</p>
 
-        <pre class="lk-code"><code>pip install rocannon
+          <pre class="lk-code"><code>pip install rocannon
 rocannon quickstart
 # → scaffolds a localhost profile, prints MCP client wiring</code></pre>
 
-        <img src="./assets/demo-agent.gif" alt="Rocannon demo: Claude Code calling Ansible modules via MCP" class="demo-img">
+          <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:1.25rem">
 
-        <div class="stat-row">
-          <div class="lk-stat">
-            <div class="lk-stat-label">ansible.builtin modules</div>
-            <div class="lk-stat-value">71</div>
+            <a href="quickstart.html" class="lk-btn lk-btn-primary lk-btn-lg">Get started →</a>
+            <a href="https://github.com/msradam/rocannon" class="lk-btn lk-btn-lg">GitHub</a>
           </div>
-          <div class="lk-stat">
-            <div class="lk-stat-label">Config per new module</div>
-            <div class="lk-stat-value">zero</div>
-          </div>
-          <div class="lk-stat">
-            <div class="lk-stat-label">MCP transports</div>
-            <div class="lk-stat-value">stdio · http</div>
-          </div>
-          <div class="lk-stat">
-            <div class="lk-stat-label">License</div>
-            <div class="lk-stat-value">MIT</div>
+
+          <div class="stat-row">
+            <div class="lk-stat">
+              <div class="lk-stat-label">Check mode</div>
+              <div class="lk-stat-value">built-in</div>
+            </div>
+            <div class="lk-stat">
+              <div class="lk-stat-label">Transports</div>
+              <div class="lk-stat-value">stdio · http</div>
+            </div>
+            <div class="lk-stat">
+              <div class="lk-stat-label">Playbook export</div>
+              <div class="lk-stat-value">standard YAML</div>
+            </div>
+            <div class="lk-stat">
+              <div class="lk-stat-label">License</div>
+              <div class="lk-stat-value">MIT</div>
+            </div>
           </div>
         </div>
-
-        <p style="opacity:0.65; font-size:0.875rem; margin-top:-1rem">
-          Add <code class="lk-code-inline">community.general</code> and the count grows by 582 more.
-          Every collection you install expands the tool set automatically.
-        </p>
 
         <hr class="lk-rule">
 
@@ -188,7 +182,7 @@ rocannon quickstart
         </table>
 
         <div class="lk-note lk-note-info" style="margin-top:1.5rem">
-          <strong>OS-layer coverage.</strong> Dedicated MCP servers for MongoDB, AWS, and Kubernetes operate at the service API layer. Rocannon reaches the OS underneath. The same session that provisions infrastructure can configure the hosts. <a href="site/comparison.html" class="lk-link">See the full comparison →</a>
+          <strong>OS-layer coverage.</strong> Dedicated MCP servers for MongoDB, AWS, and Kubernetes operate at the service API layer. Rocannon reaches the OS underneath. The same session that provisions infrastructure can configure the hosts. <a href="comparison.html" class="lk-link">See the full comparison →</a>
         </div>
 
       </div>

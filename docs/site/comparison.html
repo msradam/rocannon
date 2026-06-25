@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="onyx">
+<head>
+  <meta charset="utf-8">
+  <script>(function(){var t=localStorage.getItem('lk-theme');if(t)document.documentElement.setAttribute('data-theme',t);}())</script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rocannon vs Dedicated MCP — Rocannon</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/msradam/lokta-css@main/lokta.css">
+  <style>
+    .page-content { max-width: 900px; }
+    pre.lk-code { margin: 0.75rem 0; }
+    .lk-sidebar-brand { display: flex; align-items: center; gap: 0.6rem; }
+    .brand-logo { width: 28px; height: 28px; }
+    h2 { margin-top: 2.5rem; }
+    h3 { margin-top: 1.75rem; }
+    .decision-table td:first-child { white-space: nowrap; }
+    [data-theme="paper"] .brand-logo { filter: brightness(0.55) saturate(0.7); }
+    .lk-sidebar { display: flex; flex-direction: column; min-height: 100vh; }
+    .sidebar-footer { margin-top: auto; padding: 0.75rem 1rem; border-top: 1px solid var(--lk-border, #333); }
+    .theme-btn { background: none; border: 1px solid var(--lk-border, #555); padding: 0.2rem 0.6rem; font-size: 0.7rem; cursor: pointer; color: inherit; font-family: inherit; }
+  </style>
+</head>
+<body class="lk lk-sheet">
+<div class="lk-shell">
+
+  <aside class="lk-sidebar">
+    <div class="lk-sidebar-brand">
+      <img src="../assets/gryphon.svg" alt="" class="brand-logo">
+      <strong>Rocannon</strong>
+      <span class="lk-tag">v0.1.4</span>
+    </div>
+    <nav>
+      <div class="lk-nav">
+        <span class="lk-nav-section">Getting Started</span>
+        <a href="index.html" class="lk-nav-item">Overview</a>
+        <a href="quickstart.html" class="lk-nav-item">Quickstart</a>
+        <span class="lk-nav-section">Reference</span>
+        <a href="profiles.html" class="lk-nav-item">Profiles</a>
+        <a href="cli.html" class="lk-nav-item">CLI</a>
+        <a href="clients.html" class="lk-nav-item">MCP Clients</a>
+        <span class="lk-nav-section">Concepts</span>
+        <a href="architecture.html" class="lk-nav-item">How it Works</a>
+        <a href="comparison.html" class="lk-nav-item" aria-current="page">vs Dedicated MCP</a>
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="theme-btn" id="theme-btn" onclick="lkThemeToggle()">Light</button>
+    </div>
+  </aside>
+  <script>
+    function lkThemeToggle(){
+      var html = document.documentElement;
+      var next = html.getAttribute('data-theme') === 'onyx' ? 'paper' : 'onyx';
+      html.setAttribute('data-theme', next);
+      localStorage.setItem('lk-theme', next);
+      document.getElementById('theme-btn').textContent = next === 'onyx' ? 'Light' : 'Dark';
+    }
+    document.addEventListener('DOMContentLoaded', function(){
+      var btn = document.getElementById('theme-btn');
+      if (btn) btn.textContent = document.documentElement.getAttribute('data-theme') === 'onyx' ? 'Light' : 'Dark';
+    });
+  </script>
+
+  <main class="lk-main">
+    <div class="lk-content">
+      <div class="page-content">
+
+        <h1>Rocannon vs dedicated MCP servers</h1>
+        <p>Most MCP servers operate at one layer: the service API. They can query MongoDB collections, describe EC2 instances, or list Kubernetes pods. None of them can touch the OS underneath. Rocannon operates at the OS and configuration layer — the same layer Ansible has owned for 15 years.</p>
+
+        <div class="lk-note lk-note-info" style="margin-bottom:2rem">
+          <strong>These are not competing tools.</strong> Run a MongoDB MCP server alongside Rocannon: MongoDB MCP for document queries and Atlas management, Rocannon for <code class="lk-code-inline">mongod</code> installation and OS configuration. Each does what the other cannot.
+        </div>
+
+        <h2>Collection-by-collection comparison</h2>
+        <table class="lk-table">
+          <thead>
+            <tr>
+              <th>Collection</th>
+              <th>Equivalent MCP server</th>
+              <th>What Rocannon does that the MCP server cannot</th>
+              <th>What the MCP server does better</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code class="lk-code-inline">amazon.aws</code></td>
+              <td>AWS MCP (awslabs, official)</td>
+              <td>OS-level config on EC2 — packages, users, services, files; cross-cloud plays; Vault-sourced credentials</td>
+              <td>CloudWatch log correlation, cost analysis, IAM-governed access, interactive resource discovery</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">azure.azcollection</code></td>
+              <td>Azure MCP (Microsoft, official)</td>
+              <td>Configure VMs after provisioning; multi-cloud orchestration; combining ARM + host config in one run</td>
+              <td>Azure CLI generation, VS Code integration, conversational resource management</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">google.cloud</code></td>
+              <td>Google Cloud MCP (50+ official managed servers)</td>
+              <td>OS-level config on GCE VMs; self-managed database setup; no local install required on GCP's side</td>
+              <td>BigQuery, GKE, Cloud SQL via natural language; remote managed endpoints</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">kubernetes.core</code></td>
+              <td>kubernetes-mcp-server (Red Hat/containers, GA)</td>
+              <td>Node-level OS config before the K8s API exists; kubeadm bootstrap; containerd and kubelet management</td>
+              <td>Conversational cluster troubleshooting, log correlation, multi-cluster inspection</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">community.docker</code></td>
+              <td>Docker MCP Toolkit (Docker Desktop 4.62+)</td>
+              <td>Install Docker Engine on bare hosts; configure daemon.json; manage containers across an inventory</td>
+              <td>GUI-integrated server discovery, Docker Desktop catalog</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">community.mongodb</code></td>
+              <td>mongodb-mcp-server (MongoDB, official)</td>
+              <td>Install mongod, write mongod.conf, build replica sets across inventory hosts, configure OS-level ulimits and firewall</td>
+              <td>Query documents, Atlas integration, schema analysis, Performance Advisor</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">community.postgresql</code></td>
+              <td><em>No official MCP server</em> (Anthropic reference deprecated July 2025)</td>
+              <td>Install PostgreSQL, configure pg_hba.conf and postgresql.conf, set up streaming replication across inventory</td>
+              <td>Interactive SQL for already-running managed instances (community-only servers)</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">community.mysql</code></td>
+              <td><em>No official MCP server</em> (AWS Aurora MCP covers managed Aurora only)</td>
+              <td>Install MySQL, configure my.cnf, manage replication across self-managed hosts</td>
+              <td>Managed Aurora SQL via AWS MCP (Aurora only)</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">community.hashi_vault</code></td>
+              <td>Vault MCP (HashiCorp, public beta)</td>
+              <td>Install and initialise Vault on hosts; unseal across a cluster; pull Vault secrets into module arguments for downstream services</td>
+              <td>Interactive KV/PKI management, secret CRUD via natural language</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">cisco.ios</code> / <code class="lk-code-inline">arista.eos</code></td>
+              <td>Cisco Docker Suite / Arista CloudVision MCP (management-plane only)</td>
+              <td>Idempotent device config via NETCONF/SSH; check/diff before pushing; change-management workflows across device fleets</td>
+              <td>CloudVision/Catalyst Center conversational queries, telemetry</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">ansible.builtin</code> / <code class="lk-code-inline">ansible.posix</code></td>
+              <td><em>No official MCP server</em> (community SSH servers only)</td>
+              <td>Idempotent package/service/file/user management; distro-abstracted (apt/yum/dnf); check mode; no raw shell required</td>
+              <td>Bare imperative shell (community SSH servers — no idempotency)</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h2>When to reach for what</h2>
+        <table class="lk-table decision-table" style="margin-bottom:2rem">
+          <thead><tr><th>Situation</th><th>Reach for</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>Diagnose a live host, gather facts, apply a targeted fix — all in one conversation</td>
+              <td><strong>Rocannon</strong></td>
+            </tr>
+            <tr>
+              <td>Query documents, inspect schemas, manage Atlas clusters</td>
+              <td><strong>MongoDB MCP server</strong></td>
+            </tr>
+            <tr>
+              <td>The same task must run reliably across 10+ hosts, on a schedule, or in CI</td>
+              <td><strong>Ansible playbook</strong> (commit from Rocannon with <code class="lk-code-inline">commit_session</code>)</td>
+            </tr>
+            <tr>
+              <td>Your org runs Ansible Automation Platform and you want Claude to trigger job templates</td>
+              <td><strong>AAP MCP server</strong> (<code class="lk-code-inline">ansible/aap-mcp-server</code>)</td>
+            </tr>
+            <tr>
+              <td>You only need a shell — no module library, no idempotency</td>
+              <td><strong>SSH MCP server</strong></td>
+            </tr>
+            <tr>
+              <td>Both OS and service layer in one session (install MongoDB <em>and</em> query it)</td>
+              <td><strong>Rocannon + MongoDB MCP server</strong> side by side</td>
+            </tr>
+            <tr>
+              <td>Self-managed PostgreSQL or MySQL — no official MCP server exists</td>
+              <td><strong>Rocannon</strong> — the only MCP option here</td>
+            </tr>
+            <tr>
+              <td>Network device config (Cisco, Arista, Juniper) — MCP coverage is thin</td>
+              <td><strong>Rocannon</strong> with <code class="lk-code-inline">cisco.ios</code>, <code class="lk-code-inline">arista.eos</code>, <code class="lk-code-inline">junipernetworks.junos</code></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h2>Why not just use an SSH MCP server?</h2>
+        <p>SSH MCP gives you a shell. Rocannon gives you Ansible modules — <code class="lk-code-inline">ansible.builtin.copy</code>, <code class="lk-code-inline">community.crypto.x509_certificate</code>, <code class="lk-code-inline">kubernetes.core.k8s</code> — typed, idempotent, with check mode and diff. The LLM gets a tool that declares what it does and what it changes, not a raw shell that could do anything.</p>
+
+        <h2>Why not just write a playbook?</h2>
+        <p>You should, eventually. Rocannon's <code class="lk-code-inline">commit_session</code> tool turns a successful conversation into a standard Ansible playbook that runs with <code class="lk-code-inline">ansible-playbook</code> and no Rocannon in the loop. The workflow is: explore and fix with Rocannon, then commit for the next time it needs to be repeatable.</p>
+
+        <h2>What plain Ansible still does better</h2>
+        <ul>
+          <li>Multi-host sequencing with <code class="lk-code-inline">serial</code>, <code class="lk-code-inline">throttle</code>, and <code class="lk-code-inline">run_once</code></li>
+          <li>Approval gates and change-management pipelines</li>
+          <li>Compliance drift enforcement via scheduled runs</li>
+          <li>Versioned roles and collections as reusable automation packages</li>
+          <li>CI/CD integration — triggerable by pipelines, not conversational agents</li>
+        </ul>
+        <p>Rocannon is a conversation partner and exploration tool. When a task needs to be repeatable, auditable, and pipeline-triggerable, commit it to a playbook.</p>
+
+      </div>
+    </div>
+  </main>
+
+</div>
+</body>
+</html>

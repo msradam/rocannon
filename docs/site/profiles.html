@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="onyx">
+<head>
+  <meta charset="utf-8">
+  <script>(function(){var t=localStorage.getItem('lk-theme');if(t)document.documentElement.setAttribute('data-theme',t);}())</script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Profiles — Rocannon</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/msradam/lokta-css@main/lokta.css">
+  <style>
+    .page-content { max-width: 800px; }
+    pre.lk-code { margin: 0.75rem 0; }
+    .lk-sidebar-brand { display: flex; align-items: center; gap: 0.6rem; }
+    .brand-logo { width: 28px; height: 28px; }
+    h2 { margin-top: 2.5rem; }
+    h3 { margin-top: 1.75rem; }
+    .key-badge { font-family: var(--font-mono, monospace); font-size: 0.85rem; }
+    [data-theme="paper"] .brand-logo { filter: brightness(0.55) saturate(0.7); }
+    .lk-sidebar { display: flex; flex-direction: column; min-height: 100vh; }
+    .sidebar-footer { margin-top: auto; padding: 0.75rem 1rem; border-top: 1px solid var(--lk-border, #333); }
+    .theme-btn { background: none; border: 1px solid var(--lk-border, #555); padding: 0.2rem 0.6rem; font-size: 0.7rem; cursor: pointer; color: inherit; font-family: inherit; }
+  </style>
+</head>
+<body class="lk lk-sheet">
+<div class="lk-shell">
+
+  <aside class="lk-sidebar">
+    <div class="lk-sidebar-brand">
+      <img src="../assets/gryphon.svg" alt="" class="brand-logo">
+      <strong>Rocannon</strong>
+      <span class="lk-tag">v0.1.4</span>
+    </div>
+    <nav>
+      <div class="lk-nav">
+        <span class="lk-nav-section">Getting Started</span>
+        <a href="index.html" class="lk-nav-item">Overview</a>
+        <a href="quickstart.html" class="lk-nav-item">Quickstart</a>
+        <span class="lk-nav-section">Reference</span>
+        <a href="profiles.html" class="lk-nav-item" aria-current="page">Profiles</a>
+        <a href="cli.html" class="lk-nav-item">CLI</a>
+        <a href="clients.html" class="lk-nav-item">MCP Clients</a>
+        <span class="lk-nav-section">Concepts</span>
+        <a href="architecture.html" class="lk-nav-item">How it Works</a>
+        <a href="comparison.html" class="lk-nav-item">vs Dedicated MCP</a>
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="theme-btn" id="theme-btn" onclick="lkThemeToggle()">Light</button>
+    </div>
+  </aside>
+  <script>
+    function lkThemeToggle(){
+      var html = document.documentElement;
+      var next = html.getAttribute('data-theme') === 'onyx' ? 'paper' : 'onyx';
+      html.setAttribute('data-theme', next);
+      localStorage.setItem('lk-theme', next);
+      document.getElementById('theme-btn').textContent = next === 'onyx' ? 'Light' : 'Dark';
+    }
+    document.addEventListener('DOMContentLoaded', function(){
+      var btn = document.getElementById('theme-btn');
+      if (btn) btn.textContent = document.documentElement.getAttribute('data-theme') === 'onyx' ? 'Light' : 'Dark';
+    });
+  </script>
+
+  <main class="lk-main">
+    <div class="lk-content">
+      <div class="page-content">
+
+        <h1>Profiles</h1>
+        <p>A profile is a YAML file that declares which inventory to use and which modules and roles to expose as MCP tools. Rocannon reads one or more profiles at startup and registers the union of their tools.</p>
+
+        <h2>Full profile reference</h2>
+        <pre class="lk-code"><code>inventories:
+  - ./hosts                        # path to inventory file or directory
+  - ./hosts.d/                     # multiple inventories are supported
+
+modules:
+  - ansible.builtin.copy           # a single module FQCN
+  - ansible.builtin                # a whole collection → all its modules
+  - community                      # a namespace → all collections in it
+  - community.docker               # mix module, collection, namespace specs freely
+
+roles:                             # optional
+  - my_ns.my_coll.setup_web        # FQCN for a collection role
+  - standalone_role                # bare name for a standalone role (needs roles_path)
+
+roles_path: ./roles                # optional; resolves against the profile file's directory
+
+ansible_cfg: ./ansible.cfg         # optional; sets ANSIBLE_CONFIG for module runs
+
+vault_password_file: ./vault.key   # optional; sets ANSIBLE_VAULT_PASSWORD_FILE
+
+extra_envvars:                     # optional; merged into the ansible-runner environment
+  CUSTOM_VAR: value
+  ANOTHER_VAR: other
+
+timeouts:                          # optional; per-module execution timeout in seconds
+  ansible.builtin.command: 60      # default is 300s (5 minutes)
+  ansible.builtin.shell: 60</code></pre>
+
+        <div class="lk-note lk-note-info" style="margin-top:1rem">
+          All file paths in a profile resolve <strong>relative to the profile file's directory</strong>, not the process CWD. This is what makes absolute-path invocations from MCP clients work correctly.
+        </div>
+
+        <h2>Configuration keys</h2>
+        <table class="lk-table">
+          <thead>
+            <tr>
+              <th>Key</th>
+              <th>Required</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code class="lk-code-inline">inventories</code></td>
+              <td><span class="lk-tag lk-tag-filled">required</span></td>
+              <td>List of paths to Ansible inventory files or directories. Rocannon delegates all parsing (group_vars, Jinja2, dynamic inventories) to <code class="lk-code-inline">ansible-inventory</code>.</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">modules</code></td>
+              <td><span class="lk-tag lk-tag-filled">required*</span></td>
+              <td>List of module, collection, or namespace specs. A namespace like <code class="lk-code-inline">community</code> expands to every installed module in that namespace. Only modules become tools; filter and lookup plugins are skipped. *Required unless <code class="lk-code-inline">roles</code> is set.</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">roles</code></td>
+              <td><span class="lk-tag">optional</span></td>
+              <td>List of role names to expose. A collection role uses its FQCN (<code class="lk-code-inline">my_ns.my_coll.role</code>). A standalone role uses its directory name. Roles without <code class="lk-code-inline">meta/argument_specs.yml</code> are skipped — Rocannon cannot build a typed interface without a documented spec.</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">roles_path</code></td>
+              <td><span class="lk-tag">optional</span></td>
+              <td>Directory containing standalone roles. Set this when roles are not in a collection and not on the default Ansible roles path.</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">ansible_cfg</code></td>
+              <td><span class="lk-tag">optional</span></td>
+              <td>Path to an <code class="lk-code-inline">ansible.cfg</code> file. Passed to <code class="lk-code-inline">ansible-runner</code> as <code class="lk-code-inline">ANSIBLE_CONFIG</code>.</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">vault_password_file</code></td>
+              <td><span class="lk-tag">optional</span></td>
+              <td>Path to a Vault password file. Passed as <code class="lk-code-inline">ANSIBLE_VAULT_PASSWORD_FILE</code>. Vault-encrypted variables in inventory or host_vars are decrypted automatically.</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">extra_envvars</code></td>
+              <td><span class="lk-tag">optional</span></td>
+              <td>Key-value pairs merged into the subprocess environment for every module run. Useful for passing credentials that modules read from environment variables (e.g. <code class="lk-code-inline">AWS_PROFILE</code>, <code class="lk-code-inline">ZOAU_HOME</code>).</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">timeouts</code></td>
+              <td><span class="lk-tag">optional</span></td>
+              <td>Per-module execution timeout in seconds. The global default is 300s (overridden by <code class="lk-code-inline">ROCANNON_TIMEOUT</code>). Set shorter timeouts for modules that should fail fast, or longer ones for slow provisioning steps.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h2>Profile discovery</h2>
+        <p>When you run <code class="lk-code-inline">rocannon mcp serve</code> without <code class="lk-code-inline">--profile</code>, Rocannon walks up from the current directory looking for <code class="lk-code-inline">.rocannon/profiles/</code>. If it finds the directory, it loads every <code class="lk-code-inline">*.yml</code> file in it as a named profile.</p>
+        <p>Default profile resolution order:</p>
+        <ol>
+          <li><code class="lk-code-inline">default.yml</code> as a symlink — the symlink target's stem becomes the active name</li>
+          <li><code class="lk-code-inline">default.yml</code> as a regular file</li>
+          <li>The only profile in the directory, if exactly one exists</li>
+          <li>Falls back to <code class="lk-code-inline">~/.rocannon/profiles/</code> if no project-level directory is found</li>
+        </ol>
+
+        <h2>Runtime switching</h2>
+        <p>Load multiple profiles in <code class="lk-code-inline">.rocannon/profiles/</code> and switch between them at runtime without restarting the server:</p>
+        <pre class="lk-code"><code># In your MCP client or REPL:
+rocannon_list_profiles     → lists all profiles and which is active
+rocannon_current_profile   → returns the active profile's full config
+rocannon_use_profile       → switches to a named profile</code></pre>
+        <p>Tool functions read the active profile's inventory, envvars, and timeouts on every call. A profile switch takes effect immediately for subsequent calls.</p>
+
+        <div class="lk-note lk-note-info">
+          <strong>Union registration.</strong> Rocannon registers the union of every profile's modules at startup. Calling a module that isn't in the active profile returns a structured error pointing at <code class="lk-code-inline">rocannon_use_profile</code>, rather than failing inside <code class="lk-code-inline">ansible-runner</code>.
+        </div>
+
+        <h2>Example: dev/staging/prod</h2>
+        <pre class="lk-code"><code>.rocannon/profiles/
+  dev.yml         → dev inventory, full module set, permissive timeouts
+  staging.yml     → staging inventory, same modules, tighter timeouts
+  prod.yml        → production inventory, restricted module subset
+  default.yml     → symlink → dev.yml</code></pre>
+        <p>The agent sees all module tools on startup. <code class="lk-code-inline">rocannon_use_profile("prod")</code> narrows execution to the production inventory and module subset without re-registering anything.</p>
+
+        <h2>Example: network automation</h2>
+        <pre class="lk-code"><code>inventories:
+  - ./inventory/network.yml    # Arista and Cisco hosts
+
+modules:
+  - arista.eos
+  - cisco.ios
+  - ansible.netcommon
+
+ansible_cfg: ./ansible-network.cfg   # network-optimised connection settings
+
+timeouts:
+  arista.eos.eos_config: 120         # config pushes can be slow on large devices</code></pre>
+
+        <h2>Dependencies: modules with third-party libraries</h2>
+        <p>Some modules require Python packages beyond ansible-core:</p>
+        <table class="lk-table">
+          <thead><tr><th>Collection</th><th>Python dependency</th></tr></thead>
+          <tbody>
+            <tr><td><code class="lk-code-inline">community.docker</code></td><td><code class="lk-code-inline">pip install docker</code></td></tr>
+            <tr><td><code class="lk-code-inline">community.crypto</code></td><td><code class="lk-code-inline">pip install cryptography</code></td></tr>
+            <tr><td><code class="lk-code-inline">community.mongodb</code></td><td><code class="lk-code-inline">pip install pymongo</code></td></tr>
+            <tr><td><code class="lk-code-inline">community.postgresql</code></td><td><code class="lk-code-inline">pip install psycopg2-binary</code></td></tr>
+            <tr><td><code class="lk-code-inline">amazon.aws</code></td><td><code class="lk-code-inline">pip install boto3</code></td></tr>
+            <tr><td><code class="lk-code-inline">kubernetes.core</code></td><td><code class="lk-code-inline">pip install kubernetes</code></td></tr>
+          </tbody>
+        </table>
+        <p>Install these in the same environment as Rocannon. The quickstart profile pins <code class="lk-code-inline">ansible_python_interpreter</code> so localhost modules use the right interpreter automatically.</p>
+
+      </div>
+    </div>
+  </main>
+
+</div>
+</body>
+</html>

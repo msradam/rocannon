@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="onyx">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quickstart - Rocannon</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/msradam/lokta-css@main/lokta.css">
+  <style>
+    .page-content { max-width: 760px; }
+    .step { margin: 2rem 0; }
+    .step-num { display: inline-flex; align-items: center; justify-content: center;
+                width: 1.75rem; height: 1.75rem; border: 1px solid currentColor;
+                font-family: var(--font-mono, monospace); font-size: 0.8rem;
+                margin-bottom: 0.5rem; }
+    pre.lk-code { margin: 0.75rem 0; }
+    .lk-sidebar-brand { display: flex; align-items: center; gap: 0.6rem; }
+    .brand-logo { width: 28px; height: 28px; }
+    h2 { margin-top: 2.5rem; }
+    .theme-btn { background: none; border: 1px solid var(--lk-border, #555); border-radius: 3px; cursor: pointer; font-size: 0.85rem; padding: 0.1rem 0.4rem; margin-left: auto; color: inherit; line-height: 1; }
+    .theme-btn:hover { opacity: 0.7; }
+  </style>
+  <script>(function(){var t=localStorage.getItem("lk-theme")||"onyx";document.documentElement.setAttribute("data-theme",t);})();</script>
+</head>
+<body class="lk lk-sheet">
+<div class="lk-shell">
+
+  <aside class="lk-sidebar">
+    <div class="lk-sidebar-brand">
+      <img src="./assets/gryphon.svg" alt="" class="brand-logo">
+      <strong>Rocannon</strong>
+      <span class="lk-tag">v0.1.4</span>
+      <button class="theme-btn" id="theme-toggle" title="Toggle theme">☀</button>
+    </div>
+    <nav>
+      <div class="lk-nav">
+        <span class="lk-nav-section">Getting Started</span>
+        <a href="index.html" class="lk-nav-item">Overview</a>
+        <a href="quickstart.html" class="lk-nav-item" aria-current="page">Quickstart</a>
+        <span class="lk-nav-section">Reference</span>
+        <a href="profiles.html" class="lk-nav-item">Profiles</a>
+        <a href="cli.html" class="lk-nav-item">CLI</a>
+        <a href="clients.html" class="lk-nav-item">MCP Clients</a>
+        <span class="lk-nav-section">Concepts</span>
+        <a href="architecture.html" class="lk-nav-item">How it Works</a>
+        <a href="comparison.html" class="lk-nav-item">vs Dedicated MCP</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main class="lk-main">
+    <div class="lk-content">
+      <div class="page-content">
+
+        <h1>Quickstart</h1>
+        <p>From zero to a working Ansible-backed MCP tool in three steps. This guide uses localhost; the same steps apply to any remote host by editing the inventory.</p>
+
+        <div class="lk-note lk-note-info">
+          <strong>Prerequisites:</strong> Python 3.12+, and SSH access to the hosts you want to automate (localhost works out of the box via the local connection).
+        </div>
+
+        <div class="step">
+          <div class="step-num">1</div>
+          <h2 style="margin-top:0.25rem">Install</h2>
+          <pre class="lk-code"><code>pip install rocannon</code></pre>
+          <p>This installs <code class="lk-code-inline">ansible-core</code> and <code class="lk-code-inline">ansible-runner</code> alongside Rocannon. Verify the environment:</p>
+          <pre class="lk-code"><code>rocannon doctor</code></pre>
+          <p>You should see all binaries (<code class="lk-code-inline">ansible-doc</code>, <code class="lk-code-inline">ansible-inventory</code>, <code class="lk-code-inline">ansible-runner</code>) marked <code class="lk-code-inline">[ ok ]</code>.</p>
+        </div>
+
+        <hr class="lk-rule-hair">
+
+        <div class="step">
+          <div class="step-num">2</div>
+          <h2 style="margin-top:0.25rem">Scaffold a profile</h2>
+          <pre class="lk-code"><code>rocannon quickstart</code></pre>
+          <p>This writes two files under <code class="lk-code-inline">.rocannon/</code>:</p>
+          <table class="lk-table">
+            <tbody>
+              <tr>
+                <td><code class="lk-code-inline">.rocannon/quickstart.yml</code></td>
+                <td>Profile declaring localhost inventory and a handful of builtin modules</td>
+              </tr>
+              <tr>
+                <td><code class="lk-code-inline">.rocannon/inventory.ini</code></td>
+                <td>Inventory pinning localhost to the same Python interpreter Rocannon uses</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>Confirm the tools registered:</p>
+          <pre class="lk-code"><code>rocannon mcp doctor --profile .rocannon/quickstart.yml</code></pre>
+          <p>Output shows the tool count, resource count, and prompt count for the server as your MCP client will see it.</p>
+        </div>
+
+        <hr class="lk-rule-hair">
+
+        <div class="step">
+          <div class="step-num">3</div>
+          <h2 style="margin-top:0.25rem">Wire your MCP client</h2>
+
+          <p><strong>Claude Code</strong> (recommended for first use):</p>
+          <pre class="lk-code"><code>claude mcp add rocannon -- rocannon mcp serve --profile /absolute/path/to/.rocannon/quickstart.yml</code></pre>
+
+          <p><strong>Or add to <code class="lk-code-inline">.mcp.json</code></strong> (Claude Code, Cursor, any client that reads it):</p>
+          <pre class="lk-code"><code>{
+  "mcpServers": {
+    "rocannon": {
+      "command": "rocannon",
+      "args": ["mcp", "serve", "--profile", "/absolute/path/to/.rocannon/quickstart.yml"]
+    }
+  }
+}</code></pre>
+
+          <p>Use an absolute path. MCP clients launch the server from their own CWD, not yours.</p>
+        </div>
+
+        <hr class="lk-rule">
+
+        <h2>First conversation</h2>
+        <p>In Claude Code (or whichever client you wired), try:</p>
+        <blockquote class="lk-quote">
+          <p>Gather facts from localhost and tell me the OS and kernel version.</p>
+        </blockquote>
+        <p>Rocannon runs <code class="lk-code-inline">ansible.builtin.setup</code> against localhost and returns the structured fact output. The assistant can then answer in plain English.</p>
+
+        <hr class="lk-rule">
+
+        <h2>Without an LLM</h2>
+        <p>The REPL drives the same server in-process, no MCP client needed:</p>
+        <pre class="lk-code"><code>rocannon repl --profile .rocannon/quickstart.yml</code></pre>
+        <pre class="lk-code"><code>rocannon> setup target=localhost
+rocannon> .save my-first-session "gather facts from localhost"</code></pre>
+        <p>The <code class="lk-code-inline">.save</code> command writes the session to <code class="lk-code-inline">.rocannon/playbooks/my-first-session.yml</code>, a standard Ansible playbook that runs without Rocannon.</p>
+
+        <hr class="lk-rule">
+
+        <h2>Next steps</h2>
+        <ul>
+          <li>Add more modules: edit the profile's <code class="lk-code-inline">modules:</code> list to include collections like <code class="lk-code-inline">community.docker</code> or <code class="lk-code-inline">amazon.aws</code>. <a href="profiles.html" class="lk-link">Profile reference →</a></li>
+          <li>Point at real hosts: replace the localhost inventory with your actual SSH inventory.</li>
+          <li>Add multiple profiles for different environments (dev/staging/prod) and switch at runtime with <code class="lk-code-inline">rocannon_use_profile</code>.</li>
+          <li>Use <code class="lk-code-inline">check=true</code> on any module call to preview what would change before applying it.</li>
+        </ul>
+
+      </div>
+    </div>
+  </main>
+
+</div>
+<script>
+  (function(){
+    function getTheme(){ return document.documentElement.getAttribute("data-theme") || "onyx"; }
+    function setTheme(t){ document.documentElement.setAttribute("data-theme",t); localStorage.setItem("lk-theme",t); }
+    var btn = document.getElementById("theme-toggle");
+    if (!btn) return;
+    btn.textContent = getTheme() === "onyx" ? "☀" : "☾";
+    btn.addEventListener("click", function(){
+      var next = getTheme() === "onyx" ? "paper" : "onyx";
+      setTheme(next); btn.textContent = next === "onyx" ? "☀" : "☾";
+    });
+  })();
+</script>
+</body>
+</html>

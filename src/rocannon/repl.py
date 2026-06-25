@@ -188,7 +188,7 @@ class Repl:
         self.groups = list(inv.get("groups", []))
 
         print_formatted_text(FormattedText([("ansicyan", SPLASH)]))
-        print_formatted_text("  Ansible, Terraform, Helm as typed MCP tools.")
+        print_formatted_text("  Every installed Ansible module as a typed MCP tool.")
         print_formatted_text()
         nh, ng = len(self.hosts), len(self.groups)
         _print_ok(

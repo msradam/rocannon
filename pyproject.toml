@@ -47,10 +47,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Back-compat alias: Ansible is a core dependency now, but the 0.1.0 install
-# command `pip install 'rocannon[ansible]'` still resolves.
-ansible = []
-
 # --- AI ---
 # `pip install 'rocannon[ai]'` enables `.ai` mode in the REPL. Backend is
 # picked per-call via ROCANNON_AI_MODEL (e.g. "anthropic/claude-sonnet-4-5",

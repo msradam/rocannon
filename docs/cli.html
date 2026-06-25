@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="onyx">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CLI Reference - Rocannon</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/msradam/lokta-css@main/lokta.css">
+  <style>
+    .page-content { max-width: 820px; }
+    pre.lk-code { margin: 0.75rem 0; }
+    .lk-sidebar-brand { display: flex; align-items: center; gap: 0.6rem; }
+    .brand-logo { width: 28px; height: 28px; }
+    h2 { margin-top: 2.5rem; border-top: 1px solid var(--lk-border, #333); padding-top: 1.5rem; }
+    h2:first-of-type { border-top: none; padding-top: 0; }
+    .cmd-sig { font-family: var(--font-mono, monospace); font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem; }
+    .flag-table { margin: 0.75rem 0 1rem; }
+    .theme-btn { background: none; border: 1px solid var(--lk-border, #555); border-radius: 3px; cursor: pointer; font-size: 0.85rem; padding: 0.1rem 0.4rem; margin-left: auto; color: inherit; line-height: 1; }
+    .theme-btn:hover { opacity: 0.7; }
+  </style>
+  <script>(function(){var t=localStorage.getItem("lk-theme")||"onyx";document.documentElement.setAttribute("data-theme",t);})();</script>
+</head>
+<body class="lk lk-sheet">
+<div class="lk-shell">
+
+  <aside class="lk-sidebar">
+    <div class="lk-sidebar-brand">
+      <img src="./assets/gryphon.svg" alt="" class="brand-logo">
+      <strong>Rocannon</strong>
+      <span class="lk-tag">v0.1.4</span>
+      <button class="theme-btn" id="theme-toggle" title="Toggle theme">☀</button>
+    </div>
+    <nav>
+      <div class="lk-nav">
+        <span class="lk-nav-section">Getting Started</span>
+        <a href="index.html" class="lk-nav-item">Overview</a>
+        <a href="quickstart.html" class="lk-nav-item">Quickstart</a>
+        <span class="lk-nav-section">Reference</span>
+        <a href="profiles.html" class="lk-nav-item">Profiles</a>
+        <a href="cli.html" class="lk-nav-item" aria-current="page">CLI</a>
+        <a href="clients.html" class="lk-nav-item">MCP Clients</a>
+        <span class="lk-nav-section">Concepts</span>
+        <a href="architecture.html" class="lk-nav-item">How it Works</a>
+        <a href="comparison.html" class="lk-nav-item">vs Dedicated MCP</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main class="lk-main">
+    <div class="lk-content">
+      <div class="page-content">
+
+        <h1>CLI Reference</h1>
+        <p>All Rocannon subcommands. For per-module help: <code class="lk-code-inline">rocannon &lt;fqcn&gt; --help</code>.</p>
+
+        <h2>rocannon quickstart</h2>
+        <p>Scaffold a localhost profile and print MCP client wiring.</p>
+        <pre class="lk-code"><code>rocannon quickstart [--dir DIR] [--force]</code></pre>
+        <table class="lk-table flag-table">
+          <thead><tr><th>Flag</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code class="lk-code-inline">--dir</code></td><td><code class="lk-code-inline">.rocannon</code></td><td>Directory to write the profile and inventory</td></tr>
+            <tr><td><code class="lk-code-inline">--force</code></td><td>false</td><td>Overwrite existing files</td></tr>
+          </tbody>
+        </table>
+        <p>Writes <code class="lk-code-inline">quickstart.yml</code> (profile) and <code class="lk-code-inline">inventory.ini</code> (localhost), then prints the exact <code class="lk-code-inline">claude mcp add</code> and <code class="lk-code-inline">.mcp.json</code> snippets for your client.</p>
+
+        <h2>rocannon mcp serve</h2>
+        <p>Start the MCP server. This is the command your MCP client runs.</p>
+        <pre class="lk-code"><code>rocannon mcp serve [--profile PROF] [--inventory INV] [--modules MOD]
+                  [--transport stdio|http] [--log-level LEVEL]</code></pre>
+        <table class="lk-table flag-table">
+          <thead><tr><th>Flag</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code class="lk-code-inline">--profile / -p</code></td><td>auto-discover</td><td>Profile path or name from <code class="lk-code-inline">.rocannon/profiles/</code></td></tr>
+            <tr><td><code class="lk-code-inline">--inventory / -i</code></td><td>—</td><td>Inventory file (repeatable). Alternative to --profile.</td></tr>
+            <tr><td><code class="lk-code-inline">--modules / -m</code></td><td>—</td><td>Module/collection/namespace spec (repeatable)</td></tr>
+            <tr><td><code class="lk-code-inline">--transport</code></td><td><code class="lk-code-inline">stdio</code></td><td><code class="lk-code-inline">stdio</code> for MCP clients; <code class="lk-code-inline">http</code> for HTTP/SSE transport</td></tr>
+            <tr><td><code class="lk-code-inline">--log-level</code></td><td><code class="lk-code-inline">INFO</code></td><td><code class="lk-code-inline">DEBUG</code> / <code class="lk-code-inline">INFO</code> / <code class="lk-code-inline">WARNING</code> / <code class="lk-code-inline">ERROR</code></td></tr>
+          </tbody>
+        </table>
+        <p>Environment variables that tune the server:</p>
+        <table class="lk-table flag-table">
+          <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code class="lk-code-inline">ROCANNON_TIMEOUT</code></td><td>300</td><td>Global execution timeout per tool call (seconds)</td></tr>
+            <tr><td><code class="lk-code-inline">ROCANNON_IDLE_TIMEOUT</code></td><td>60</td><td>Idle timeout within a run</td></tr>
+            <tr><td><code class="lk-code-inline">ROCANNON_MAX_CONCURRENT_TOOLS</code></td><td>10</td><td>Global concurrent tool call cap</td></tr>
+            <tr><td><code class="lk-code-inline">ROCANNON_MAX_CONCURRENT_PER_HOST</code></td><td>3</td><td>Per-host concurrent cap</td></tr>
+            <tr><td><code class="lk-code-inline">ROCANNON_MAX_RESPONSE_BYTES</code></td><td>1 000 000</td><td>Max response size before truncation</td></tr>
+            <tr><td><code class="lk-code-inline">ROCANNON_LOG_FORMAT</code></td><td>text</td><td>Set to <code class="lk-code-inline">json</code> for structured JSON logs</td></tr>
+            <tr><td><code class="lk-code-inline">ROCANNON_DATA_DIR</code></td><td>CWD</td><td>Root for <code class="lk-code-inline">.rocannon/playbooks/</code> writes</td></tr>
+          </tbody>
+        </table>
+
+        <h2>rocannon mcp doctor</h2>
+        <p>Construct the MCP server in-process and report what registered.</p>
+        <pre class="lk-code"><code>rocannon mcp doctor [--profile PROF] [--inventory INV] [--modules MOD]</code></pre>
+        <p>Prints tool count, resource count, resource template count, and prompt count. Use this to verify your profile before pointing an LLM at it.</p>
+
+        <h2>rocannon doctor</h2>
+        <p>System health check: binaries, inventory parsing, optional connectivity ping.</p>
+        <pre class="lk-code"><code>rocannon doctor [--profile PROF] [--inventory INV] [--ping]</code></pre>
+        <table class="lk-table flag-table">
+          <thead><tr><th>Flag</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code class="lk-code-inline">--ping</code></td><td>Smoke-test SSH connectivity to each inventory host</td></tr>
+          </tbody>
+        </table>
+        <p>Checks: rocannon/fastmcp/ansible-core/ansible-runner versions, binary locations, env vars, configured timeouts, inventory host counts, Ansible config resolution.</p>
+
+        <h2>rocannon repl</h2>
+        <p>Interactive operator shell. Drives the same MCP server in-process with tab completion, call history, and <code class="lk-code-inline">.save</code> to write playbooks.</p>
+        <pre class="lk-code"><code>rocannon repl [--profile PROF] [--inventory INV] [--modules MOD]</code></pre>
+        <p>REPL dot commands:</p>
+        <table class="lk-table flag-table">
+          <thead><tr><th>Command</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code class="lk-code-inline">.help</code></td><td>Show all commands</td></tr>
+            <tr><td><code class="lk-code-inline">.target [HOST]</code></td><td>Show or set the default target for module calls</td></tr>
+            <tr><td><code class="lk-code-inline">.inventory</code></td><td>List loaded hosts and groups</td></tr>
+            <tr><td><code class="lk-code-inline">.modules</code></td><td>List registered module tools</td></tr>
+            <tr><td><code class="lk-code-inline">.doc &lt;module&gt;</code></td><td>Show parsed schema for a module</td></tr>
+            <tr><td><code class="lk-code-inline">.history</code></td><td>Recent calls this session</td></tr>
+            <tr><td><code class="lk-code-inline">.resources</code></td><td>List MCP resources</td></tr>
+            <tr><td><code class="lk-code-inline">.prompts</code></td><td>List saved playbook prompts</td></tr>
+            <tr><td><code class="lk-code-inline">.save &lt;name&gt; ["desc"]</code></td><td>Commit this session as a playbook</td></tr>
+            <tr><td><code class="lk-code-inline">.ai &lt;prompt&gt;</code></td><td>LLM-driven mode (requires <code class="lk-code-inline">rocannon[ai]</code> + <code class="lk-code-inline">ROCANNON_AI_MODEL</code>)</td></tr>
+            <tr><td><code class="lk-code-inline">.exit</code></td><td>Quit</td></tr>
+          </tbody>
+        </table>
+        <p>Module call syntax: <code class="lk-code-inline">&lt;module&gt; target=&lt;host&gt; key=value ...</code></p>
+        <pre class="lk-code"><code>rocannon> ping target=webservers
+rocannon> ansible.builtin.command target=db01 cmd="systemctl status postgresql"
+rocannon> .save check-db "verify postgresql is running"</code></pre>
+
+        <h2>rocannon run</h2>
+        <p>Execute a single module ad-hoc, routing through the same executor the server uses.</p>
+        <pre class="lk-code"><code>rocannon run &lt;module&gt; --target HOST -i INV [--arg key=val] [--args-file FILE]
+            [--timeout SECS] [--check] [--diff] [--pretty]</code></pre>
+        <pre class="lk-code"><code>rocannon run ansible.builtin.copy --target webservers -i hosts \
+  --arg src=/etc/nginx/nginx.conf --arg dest=/etc/nginx/nginx.conf.bak \
+  --check --diff --pretty</code></pre>
+
+        <h2>rocannon &lt;fqcn&gt;</h2>
+        <p>Invoke a module directly as a top-level subcommand. Flags are generated from <code class="lk-code-inline">ansible-doc</code> at call time.</p>
+        <pre class="lk-code"><code>rocannon ansible.builtin.copy --target h1 -i hosts --src /etc/app.conf --dest /etc/app.conf
+rocannon ansible.builtin.command --target db01 -i hosts --cmd "pg_dump mydb" --record session.yml</code></pre>
+        <table class="lk-table flag-table">
+          <thead><tr><th>Reserved flag</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code class="lk-code-inline">--target / -t</code></td><td>Host or group from inventory (required)</td></tr>
+            <tr><td><code class="lk-code-inline">--inventory / -i</code></td><td>Inventory file (overrides profile)</td></tr>
+            <tr><td><code class="lk-code-inline">--profile / -p</code></td><td>Profile to resolve inventory from</td></tr>
+            <tr><td><code class="lk-code-inline">--record FILE</code></td><td>Append this call to FILE as an Ansible play</td></tr>
+            <tr><td><code class="lk-code-inline">--check</code></td><td>Dry-run (if the module supports it)</td></tr>
+            <tr><td><code class="lk-code-inline">--diff</code></td><td>Show what would change</td></tr>
+            <tr><td><code class="lk-code-inline">--pretty</code></td><td>Pretty-print JSON output</td></tr>
+            <tr><td><code class="lk-code-inline">--timeout SECS</code></td><td>Override execution timeout</td></tr>
+          </tbody>
+        </table>
+
+        <h2>rocannon doc</h2>
+        <p>Prints the parsed schema for a module in the same format the MCP server uses.</p>
+        <pre class="lk-code"><code>rocannon doc ansible.builtin.copy
+rocannon doc community.docker.docker_container --json</code></pre>
+
+        <h2>rocannon search</h2>
+        <p>Find modules by name or description substring, case-insensitive.</p>
+        <pre class="lk-code"><code>rocannon search postgres --limit 20
+rocannon search "manage users"</code></pre>
+
+        <h2>rocannon ls</h2>
+        <p>List hosts, groups, or modules from a profile or inventory.</p>
+        <pre class="lk-code"><code>rocannon ls hosts   --profile prod
+rocannon ls groups  --inventory hosts.yml
+rocannon ls modules --profile staging</code></pre>
+
+        <h2>rocannon playbook</h2>
+        <p>Manage saved playbooks under <code class="lk-code-inline">.rocannon/playbooks/</code>.</p>
+        <pre class="lk-code"><code>rocannon playbook list
+rocannon playbook show  &lt;name&gt;
+rocannon playbook run   &lt;name&gt; -i hosts [--check] [--diff] [--pretty]</code></pre>
+        <p><code class="lk-code-inline">playbook run</code> bypasses the LLM and executes the saved steps directly through the executor. Fails fast on the first step that returns a non-successful status.</p>
+
+      </div>
+    </div>
+  </main>
+
+</div>
+<script>
+  (function(){
+    function getTheme(){ return document.documentElement.getAttribute("data-theme") || "onyx"; }
+    function setTheme(t){ document.documentElement.setAttribute("data-theme",t); localStorage.setItem("lk-theme",t); }
+    var btn = document.getElementById("theme-toggle");
+    if (!btn) return;
+    btn.textContent = getTheme() === "onyx" ? "☀" : "☾";
+    btn.addEventListener("click", function(){
+      var next = getTheme() === "onyx" ? "paper" : "onyx";
+      setTheme(next); btn.textContent = next === "onyx" ? "☀" : "☾";
+    });
+  })();
+</script>
+</body>
+</html>

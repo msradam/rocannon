@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="onyx">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How it Works - Rocannon</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/msradam/lokta-css@main/lokta.css">
+  <style>
+    .page-content { max-width: 800px; }
+    pre.lk-code { margin: 0.75rem 0; }
+    .lk-sidebar-brand { display: flex; align-items: center; gap: 0.6rem; }
+    .brand-logo { width: 28px; height: 28px; }
+    h2 { margin-top: 2.5rem; }
+    h3 { margin-top: 1.75rem; }
+    .theme-btn { background: none; border: 1px solid var(--lk-border, #555); border-radius: 3px; cursor: pointer; font-size: 0.85rem; padding: 0.1rem 0.4rem; margin-left: auto; color: inherit; line-height: 1; }
+    .theme-btn:hover { opacity: 0.7; }
+  </style>
+  <script>(function(){var t=localStorage.getItem("lk-theme")||"onyx";document.documentElement.setAttribute("data-theme",t);})();</script>
+</head>
+<body class="lk lk-sheet">
+<div class="lk-shell">
+
+  <aside class="lk-sidebar">
+    <div class="lk-sidebar-brand">
+      <img src="./assets/gryphon.svg" alt="" class="brand-logo">
+      <strong>Rocannon</strong>
+      <span class="lk-tag">v0.1.4</span>
+      <button class="theme-btn" id="theme-toggle" title="Toggle theme">☀</button>
+    </div>
+    <nav>
+      <div class="lk-nav">
+        <span class="lk-nav-section">Getting Started</span>
+        <a href="index.html" class="lk-nav-item">Overview</a>
+        <a href="quickstart.html" class="lk-nav-item">Quickstart</a>
+        <span class="lk-nav-section">Reference</span>
+        <a href="profiles.html" class="lk-nav-item">Profiles</a>
+        <a href="cli.html" class="lk-nav-item">CLI</a>
+        <a href="clients.html" class="lk-nav-item">MCP Clients</a>
+        <span class="lk-nav-section">Concepts</span>
+        <a href="architecture.html" class="lk-nav-item" aria-current="page">How it Works</a>
+        <a href="comparison.html" class="lk-nav-item">vs Dedicated MCP</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main class="lk-main">
+    <div class="lk-content">
+      <div class="page-content">
+
+        <h1>How it Works</h1>
+
+        <h2>The 30-second version</h2>
+        <p>Rocannon is a Python program that, at startup, walks the Ansible module catalog, reads each module's schema via <code class="lk-code-inline">ansible-doc -j</code>, and turns every module into a typed Python function. It hands those functions to FastMCP, which exposes them as MCP tools over stdio or HTTP.</p>
+
+        <table class="lk-table" style="margin-bottom:2rem">
+          <thead><tr><th>Source</th><th>What Rocannon reads</th><th>Tool name</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>Ansible collection</td>
+              <td><code class="lk-code-inline">ansible-doc -j &lt;module&gt;</code></td>
+              <td><code class="lk-code-inline">ansible.builtin.copy</code>, <code class="lk-code-inline">community.docker.docker_container</code>, …</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>No bundled LLM. No opinionated provider matrix. No inventory manager. Rocannon's job is the glue between "what ansible-doc ships" and "what an MCP client can call."</p>
+
+        <h2>End-to-end: one tool call</h2>
+        <p>Concrete example: the agent calls <code class="lk-code-inline">ansible.builtin.command(target="webhosts", cmd="systemctl restart nginx")</code>.</p>
+
+        <pre class="lk-code"><code>MCP client (Claude Code, Cursor, mcphost)
+    │ stdio JSON-RPC  tools/call
+    ▼
+FastMCP server  (src/rocannon/server.py)
+    │ middleware stack:
+    │   1. correlation ID assigned
+    │   2. structured log emitted
+    │   3. audit record opened + response-size limit applied
+    │   4. concurrency semaphores acquired (global + per-host)
+    │   5. tool handler runs
+    │   6. audit record completed (latency, status, redacted args)
+    ▼
+Typed tool function  (built at startup from ansible-doc schema)
+    │ subprocess
+    ▼
+ansible-runner  →  ansible-playbook  →  SSH  →  target host</code></pre>
+
+        <p>The result bubbles back up: ansible-runner parses the JSON event stream, the executor returns a structured dict, middleware records the audit entry, FastMCP serialises to MCP's tool-result format, the client gets structured JSON.</p>
+
+        <h2>Module reflection</h2>
+        <p>At startup, <code class="lk-code-inline">register_ansible_modules</code> runs <code class="lk-code-inline">ansible-doc -j &lt;names...&gt;</code> in batches of 256 modules (to amortise the 200ms Python startup cost), then for each module:</p>
+        <ul>
+          <li>Parses parameter names, types, required flags, choices, and descriptions</li>
+          <li>Builds a typed Python function with a dynamic <code class="lk-code-inline">inspect.Signature</code> matching the module's documented parameters</li>
+          <li>Adds a <code class="lk-code-inline">target</code> parameter (the inventory host or group pattern)</li>
+          <li>Injects <code class="lk-code-inline">check</code> and <code class="lk-code-inline">diff</code> parameters for modules that declare support in their ansible-doc attributes</li>
+          <li>Attaches safety hints: read-only for <code class="lk-code-inline">_info</code>/<code class="lk-code-inline">_facts</code> modules; destructive + open-world for <code class="lk-code-inline">command</code>/<code class="lk-code-inline">shell</code>/<code class="lk-code-inline">raw</code></li>
+          <li>Tags the tool by collection and namespace for client-side filtering</li>
+        </ul>
+
+        <div class="lk-note lk-note-info">
+          <strong>Parameter name collisions.</strong> Some module parameters collide with Python keywords (<code class="lk-code-inline">from</code>, <code class="lk-code-inline">type</code>) or with reserved slots (<code class="lk-code-inline">target</code>). The registration layer mangles those (e.g. <code class="lk-code-inline">type</code> → <code class="lk-code-inline">param_type</code>) and de-mangles on the way out. The mangled name is what the MCP schema exposes.
+        </div>
+
+        <h2>Middleware stack</h2>
+        <p>The server composes seven middleware layers, innermost to outermost:</p>
+        <table class="lk-table">
+          <thead><tr><th>Layer</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td>Audit</td><td>Writes a per-call JSON record (tool, target, latency, status, redacted args) to the <code class="lk-code-inline">rocannon.audit</code> logger. Feeds the in-memory run history.</td></tr>
+            <tr><td>Concurrency</td><td>Two semaphores: a global cap and a per-host cap. Prevents fan-out floods on both the server and individual targets.</td></tr>
+            <tr><td>Ping</td><td>HTTP transport only. Keepalive for long-lived sessions.</td></tr>
+            <tr><td>Structured logging</td><td>Optional JSON logging (gated by <code class="lk-code-inline">ROCANNON_LOG_FORMAT=json</code>).</td></tr>
+            <tr><td>Response limit</td><td>Caps tool response size before it reaches the MCP client. Ansible command/shell stdout can be enormous; an LLM context blown by a single dump is a real failure mode.</td></tr>
+            <tr><td>Retry</td><td>Re-runs on transient transport-level exceptions only. Module-level Ansible failures return a structured dict and are not retried.</td></tr>
+            <tr><td>Error handling</td><td>Outermost layer. Catches and formats exceptions consistently so the client always receives a well-formed response.</td></tr>
+          </tbody>
+        </table>
+
+        <p>OpenTelemetry tracing is optional. If <code class="lk-code-inline">opentelemetry-api</code> is importable, the server emits a <code class="lk-code-inline">tools/call &lt;name&gt;</code> span per call with module name, target, and latency. If it isn't, the import fails silently. No runtime cost when disabled.</p>
+
+        <h2>Playbook save and replay</h2>
+        <p>A saved session is written as a <strong>standard Ansible playbook</strong>: a list of plays, one per recorded step, with the play's <code class="lk-code-inline">hosts:</code> set to the step's target. The file runs directly under <code class="lk-code-inline">ansible-playbook</code> with no Rocannon in the loop.</p>
+        <pre class="lk-code"><code># Rocannon session: restart-stack
+# Restart the web tier and verify
+
+- name: ansible.builtin.command on webhosts
+  hosts: webhosts
+  gather_facts: false
+  tasks:
+  - name: ansible.builtin.command
+    ansible.builtin.command:
+      cmd: systemctl restart nginx
+
+- name: ansible.builtin.wait_for on webhosts
+  hosts: webhosts
+  gather_facts: false
+  tasks:
+  - name: ansible.builtin.wait_for
+    ansible.builtin.wait_for:
+      host: 127.0.0.1
+      port: 80</code></pre>
+
+        <p>Two server tools handle recording:</p>
+        <ul>
+          <li><code class="lk-code-inline">save_playbook(name, description, steps)</code>: writes a named playbook from explicit steps</li>
+          <li><code class="lk-code-inline">commit_session(name, description, since)</code>: materialises the current session's successful calls from the in-memory ring buffer</li>
+        </ul>
+        <p>On the next server start, saved playbooks are parsed back and registered as MCP prompts named <code class="lk-code-inline">playbook_&lt;name&gt;</code>. Hand-edited Ansible playbooks load the same way: any task whose module key is a registered tool becomes a step.</p>
+
+        <h2>The REPL</h2>
+        <p>The REPL constructs the same FastMCP server as <code class="lk-code-inline">mcp serve</code> and drives it in-process via <code class="lk-code-inline">fastmcp.Client</code> without a JSON-RPC transport. The middleware stack, audit log, and run history all apply the same way.</p>
+        <p>This means: whatever tools an operator can call from the REPL are exactly the tools an LLM sees through MCP. There is no REPL-only surface.</p>
+        <p><code class="lk-code-inline">.ai</code> mode uses LiteLLM, so the backend is operator-chosen via <code class="lk-code-inline">ROCANNON_AI_MODEL</code> (Ollama, OpenAI, Anthropic, watsonx, vLLM). There is no opinionated default.</p>
+
+        <h2>What is deliberately out of scope</h2>
+        <table class="lk-table">
+          <thead><tr><th>Not in scope</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td>Bundled LLM</td><td>Rocannon is an MCP server. Pick your own client.</td></tr>
+            <tr><td>Opinionated model list</td><td>LiteLLM handles backend selection; Rocannon stays neutral.</td></tr>
+            <tr><td>Inventory management UI</td><td>Ansible inventories are YAML/INI files, same as always.</td></tr>
+            <tr><td>Policy engine</td><td>Authorisation is the MCP client's responsibility.</td></tr>
+            <tr><td>Terraform / Helm / Salt</td><td>Those tools have dedicated MCP servers and different shapes. Rocannon stays narrow: every Ansible module, nothing else.</td></tr>
+            <tr><td>OpenAPI-to-MCP</td><td>FastMCP already does this. Rocannon's contribution is the typed-tools-from-Ansible-catalog path.</td></tr>
+          </tbody>
+        </table>
+
+        <h2>Code map</h2>
+        <pre class="lk-code"><code>src/rocannon/
+├── cli.py          Typer entrypoint + FQCN dispatch
+├── config.py       Pydantic Config model + YAML profile loader
+├── profiles.py     Profile discovery, registry, RuntimeContext
+├── ansible.py      Module reflection + typed tool registration
+├── server.py       FastMCP server + middleware wiring
+├── schema.py       ansible-doc parsing, module spec expansion
+├── executor.py     ansible-runner Python-API wrapper
+├── playbook.py     Session → Ansible playbook save/load
+├── repl.py         Operator REPL + optional .ai mode
+├── inventory.py    ansible-inventory subprocess wrapper
+├── history.py      In-memory ring buffer (feeds save/replay)
+├── correlation.py  Per-call correlation IDs
+└── redaction.py    Secrets redaction in audit records</code></pre>
+
+      </div>
+    </div>
+  </main>
+
+</div>
+<script>
+  (function(){
+    function getTheme(){ return document.documentElement.getAttribute("data-theme") || "onyx"; }
+    function setTheme(t){ document.documentElement.setAttribute("data-theme",t); localStorage.setItem("lk-theme",t); }
+    var btn = document.getElementById("theme-toggle");
+    if (!btn) return;
+    btn.textContent = getTheme() === "onyx" ? "☀" : "☾";
+    btn.addEventListener("click", function(){
+      var next = getTheme() === "onyx" ? "paper" : "onyx";
+      setTheme(next); btn.textContent = next === "onyx" ? "☀" : "☾";
+    });
+  })();
+</script>
+</body>
+</html>

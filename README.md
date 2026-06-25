@@ -110,6 +110,43 @@ at runtime via the `rocannon_list_profiles`, `rocannon_current_profile`, and
 > SDK) need them installed in the same environment as Rocannon. The quickstart
 > inventory pins `ansible_python_interpreter` so localhost runs use it.
 
+## Rocannon vs dedicated MCP servers
+
+Most MCP servers target one layer: the service API. The MongoDB MCP server
+queries documents. The AWS MCP server describes EC2 instances. The Kubernetes
+MCP server inspects pods. None of them can touch the OS underneath.
+
+Rocannon operates at the OS and configuration layer — the same layer Ansible
+has always owned. That makes it complementary to service-layer MCP servers,
+and the only MCP option for domains that have no official server at all.
+
+| Collection | What it does that service MCP can't | Equivalent service MCP |
+|---|---|---|
+| `amazon.aws` | Configure the OS on EC2 — packages, users, services, files | AWS MCP (awslabs) |
+| `azure.azcollection` | Configure VMs after provisioning; multi-cloud plays | Azure MCP (Microsoft, official) |
+| `google.cloud` | Configure GCE VMs; self-managed DBs on GCE | Google Cloud MCP (50+ official servers) |
+| `kubernetes.core` | Configure nodes before the API exists; bootstrap kubeadm | kubernetes-mcp-server (Red Hat) |
+| `community.mongodb` | Install `mongod`, write `mongod.conf`, build replica sets across hosts | MongoDB MCP (official) |
+| `community.postgresql` | Install PostgreSQL, configure `pg_hba.conf`, set up streaming replication | *No official MCP server* |
+| `community.mysql` | Install MySQL, configure `my.cnf`, manage replication | *No official MCP server* |
+| `community.hashi_vault` | Install and initialize Vault on hosts; pull Vault secrets into module args | Vault MCP (HashiCorp, beta) |
+| `cisco.ios` / `arista.eos` | Idempotent device config via NETCONF/SSH; `--check`/`--diff` before pushing | Cisco/Arista management-plane MCP only |
+| `ansible.builtin` / `ansible.posix` | Package, service, file, user management — abstracted across distros | SSH MCP (community only, raw shell) |
+
+A few things stand out from this table:
+
+- **Self-managed PostgreSQL and MySQL have no official MCP server.** The Anthropic reference Postgres server was deprecated in July 2025. For those, Rocannon is the only MCP path.
+- **Network automation is where MCP coverage is thinnest.** `cisco.ios`, `arista.eos`, and `junipernetworks.junos` have decades of vendor investment. The network MCP servers cover management planes (Catalyst Center, CloudVision), not direct device configuration.
+- **Dedicated service MCP servers do some things better.** MongoDB MCP's Atlas integration, AWS MCP's CloudWatch log correlation, and Google Cloud MCP's managed remote endpoints are genuinely useful for their specific domains. Use them alongside Rocannon when you need both layers.
+
+**The typical workflow:**
+
+1. Use a service MCP server to query and explore (MongoDB MCP to inspect a collection, AWS MCP to find a misconfigured security group).
+2. Use Rocannon to act at the OS or config layer (fix the EC2 user data, restart a service, push a patched config file).
+3. Run `commit_session` to save the successful steps as a standard `ansible-playbook`-runnable YAML — no Rocannon needed for the next run.
+
+**What plain Ansible still does better than Rocannon:** multi-host sequencing with `serial`, `throttle`, and `run_once`; approval gates and change-management pipelines; scheduled drift enforcement; versioned roles and collections. Rocannon is for exploration and targeted action. When a task needs to be repeatable and auditable, commit it to a playbook.
+
 ## CLI
 
 ```

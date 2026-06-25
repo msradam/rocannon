@@ -2519,7 +2519,7 @@ wheels = [
 
 [[package]]
 name = "rocannon"
-version = "0.1.3"
+version = "0.1.4"
 source = { editable = "." }
 dependencies = [
     { name = "ansible-core" },
@@ -2576,7 +2576,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "typer", specifier = ">=0.26.7" },
 ]
-provides-extras = ["ansible", "ai", "otel", "all"]
+provides-extras = ["ai", "otel", "all"]
 
 [package.metadata.requires-dev]
 dev = [

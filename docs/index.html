@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="onyx">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rocannon - Every Ansible module as a typed MCP tool</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/msradam/lokta-css@main/lokta.css">
+  <script>
+    (function(){
+      var t = localStorage.getItem('lk-theme') || 'onyx';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+  <style>
+    .hero { padding: 3rem 0 2rem; max-width: 740px; }
+    .hero h1 { font-size: 2.25rem; line-height: 1.15; margin-bottom: 1rem; }
+    .hero p { opacity: 0.8; margin-bottom: 1.5rem; max-width: 580px; line-height: 1.65; }
+    .stat-row { display: flex; gap: 2rem; margin: 2rem 0; flex-wrap: wrap; }
+    .feature-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; margin: 2rem 0; }
+    .demo-img { width: 100%; max-width: 740px; border-radius: 4px; margin: 1.5rem 0; display: block; }
+    .page-content { max-width: 860px; }
+    pre.lk-code { margin: 0.75rem 0; }
+    .lk-sidebar-brand { display: flex; align-items: center; gap: 0.6rem; }
+    .brand-logo { width: 28px; height: 28px; }
+    .theme-btn { background: none; border: 1px solid var(--lk-border, #555); border-radius: 3px;
+                 cursor: pointer; font-size: 0.85rem; padding: 0.1rem 0.4rem; margin-left: auto;
+                 color: inherit; line-height: 1; }
+    .theme-btn:hover { opacity: 0.7; }
+  </style>
+</head>
+<body class="lk lk-sheet">
+<div class="lk-shell">
+
+  <aside class="lk-sidebar">
+    <div class="lk-sidebar-brand">
+      <img src="./assets/gryphon.svg" alt="" class="brand-logo">
+      <strong>Rocannon</strong>
+      <span class="lk-tag">v0.1.4</span>
+      <button class="theme-btn" id="theme-toggle" title="Toggle theme">☀</button>
+    </div>
+    <nav>
+      <div class="lk-nav">
+        <span class="lk-nav-section">Getting Started</span>
+        <a href="index.html" class="lk-nav-item" aria-current="page">Overview</a>
+        <a href="quickstart.html" class="lk-nav-item">Quickstart</a>
+        <span class="lk-nav-section">Reference</span>
+        <a href="profiles.html" class="lk-nav-item">Profiles</a>
+        <a href="cli.html" class="lk-nav-item">CLI</a>
+        <a href="clients.html" class="lk-nav-item">MCP Clients</a>
+        <span class="lk-nav-section">Concepts</span>
+        <a href="architecture.html" class="lk-nav-item">How it Works</a>
+        <a href="comparison.html" class="lk-nav-item">vs Dedicated MCP</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main class="lk-main">
+    <div class="lk-content">
+      <div class="page-content">
+
+        <div class="hero">
+          <span class="lk-label">Open source · MIT · Python 3.12+</span>
+          <h1>Every Ansible module as a typed MCP tool.</h1>
+          <p>Rocannon runs on your Ansible control node. At startup it reads <code class="lk-code-inline">ansible-doc</code> and registers every installed module and role as a typed MCP tool. Claude Code, Cursor, or any MCP client can then drive your real infrastructure in plain English.</p>
+          <div style="display:flex; gap:0.5rem; flex-wrap:wrap">
+            <a href="quickstart.html" class="lk-btn lk-btn-primary lk-btn-lg">Get started →</a>
+            <a href="https://github.com/msradam/rocannon" class="lk-btn lk-btn-lg">GitHub</a>
+          </div>
+        </div>
+
+        <pre class="lk-code"><code>pip install rocannon
+rocannon quickstart
+# → scaffolds a localhost profile, prints MCP client wiring</code></pre>
+
+        <img src="./assets/demo-agent.gif" alt="Rocannon demo: Claude Code calling Ansible modules via MCP" class="demo-img">
+
+        <div class="stat-row">
+          <div class="lk-stat">
+            <div class="lk-stat-label">ansible.builtin modules</div>
+            <div class="lk-stat-value">85+</div>
+          </div>
+          <div class="lk-stat">
+            <div class="lk-stat-label">Config per new module</div>
+            <div class="lk-stat-value">Zero</div>
+          </div>
+          <div class="lk-stat">
+            <div class="lk-stat-label">MCP transports</div>
+            <div class="lk-stat-value">stdio · http</div>
+          </div>
+          <div class="lk-stat">
+            <div class="lk-stat-label">License</div>
+            <div class="lk-stat-value">MIT</div>
+          </div>
+        </div>
+
+        <p style="opacity:0.7; font-size:0.875rem; margin-top:-1rem">
+          Add <code class="lk-code-inline">community.general</code> and you get 1,000+ more modules.
+          Every collection you install expands the tool set automatically.
+        </p>
+
+        <hr class="lk-rule">
+
+        <h2>What it does</h2>
+        <div class="feature-grid">
+          <div class="lk-feature">
+            <div class="lk-feature-title">Reflects your modules</div>
+            <p>Install a collection and its modules become tools. Parameters, types, defaults, and choices come directly from <code class="lk-code-inline">ansible-doc</code>. Nothing to configure.</p>
+          </div>
+          <div class="lk-feature">
+            <div class="lk-feature-title">Reflects your roles</div>
+            <p>Any role with <code class="lk-code-inline">meta/argument_specs.yml</code> becomes a typed tool. Arguments are the spec parameters, validated by Ansible at run time.</p>
+          </div>
+          <div class="lk-feature">
+            <div class="lk-feature-title">Carries the metadata</div>
+            <p>Tools get safety hints (read-only vs destructive), collection tags, and a <code class="lk-code-inline">meta</code> block with the module's documented requirements, return keys, and version.</p>
+          </div>
+          <div class="lk-feature">
+            <div class="lk-feature-title">No lock-in</div>
+            <p>Any session can be committed as a standard Ansible playbook that runs with <code class="lk-code-inline">ansible-playbook</code>. No Rocannon in the loop for replays.</p>
+          </div>
+          <div class="lk-feature">
+            <div class="lk-feature-title">Dry runs</div>
+            <p>Modules that support check mode expose <code class="lk-code-inline">check</code> and <code class="lk-code-inline">diff</code> parameters, both on the CLI and as MCP tool arguments.</p>
+          </div>
+          <div class="lk-feature">
+            <div class="lk-feature-title">Multi-profile</div>
+            <p>Declare inventory, modules, and credentials in a YAML profile. Switch profiles at runtime via <code class="lk-code-inline">rocannon_use_profile</code> without restarting the server.</p>
+          </div>
+        </div>
+
+        <hr class="lk-rule">
+
+        <h2>Common collections</h2>
+        <table class="lk-table">
+          <thead>
+            <tr>
+              <th>Collection</th>
+              <th>What you get</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code class="lk-code-inline">ansible.builtin</code></td>
+              <td>Package, service, file, user, template: Linux essentials across distros</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">amazon.aws</code></td>
+              <td>EC2, S3, RDS, VPC, IAM. Includes OS-level configuration on the instances</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">kubernetes.core</code></td>
+              <td>K8s resources and node-level OS config before the API exists</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">community.docker</code></td>
+              <td>Containers, images, networks. Includes Docker Engine install on bare hosts</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">community.mongodb</code></td>
+              <td>Install mongod, write mongod.conf, configure replica sets</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">community.postgresql</code></td>
+              <td>Install PostgreSQL, configure pg_hba.conf, set up replication</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">cisco.ios</code> / <code class="lk-code-inline">arista.eos</code></td>
+              <td>Idempotent network device config via NETCONF/SSH with check mode</td>
+            </tr>
+            <tr>
+              <td><code class="lk-code-inline">ibm.ibm_zos_core</code></td>
+              <td>z/OS data sets, jobs, USS. Rocannon runs natively on LinuxONE</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="lk-note lk-note-info" style="margin-top:1.5rem">
+          <strong>OS-layer coverage.</strong> Dedicated MCP servers for MongoDB, AWS, and Kubernetes operate at the service API layer. Rocannon reaches the OS underneath. The same session that provisions infrastructure can configure the hosts. <a href="comparison.html" class="lk-link">See the full comparison →</a>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+</div>
+<script>
+  (function(){
+    function getTheme(){ return document.documentElement.getAttribute('data-theme') || 'onyx'; }
+    function setTheme(t){
+      document.documentElement.setAttribute('data-theme', t);
+      localStorage.setItem('lk-theme', t);
+    }
+    var btn = document.getElementById('theme-toggle');
+    if (!btn) return;
+    btn.textContent = getTheme() === 'onyx' ? '☀' : '☾';
+    btn.addEventListener('click', function(){
+      var next = getTheme() === 'onyx' ? 'paper' : 'onyx';
+      setTheme(next);
+      btn.textContent = next === 'onyx' ? '☀' : '☾';
+    });
+  })();
+</script>
+</body>
+</html>

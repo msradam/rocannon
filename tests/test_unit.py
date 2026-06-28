@@ -824,6 +824,70 @@ class TestApprovalGate:
         assert result["status"] == "ok"
 
 
+class TestOptionalDefaults:
+    """Omitted optional params must not be forwarded with their ansible-doc default.
+
+    Regression: a defaulted optional (e.g. template's block_start_string="{%")
+    was baked into the signature and sent on every call, crashing ansible-core's
+    templar on the literal "{%".
+    """
+
+    @staticmethod
+    def _fn() -> Any:
+        schema = {
+            "name": "a.b.c",
+            "description": "d",
+            "parameters": [
+                {"name": "src", "type": "str", "required": True},
+                {
+                    "name": "block_start_string",
+                    "type": "str",
+                    "required": False,
+                    "default": "{%",
+                },
+            ],
+            "attributes": {"check_mode": "none", "diff_mode": "none", "facts": False, "raw": False},
+        }
+        runtime = MagicMock()
+        runtime.is_module_active.return_value = True
+        runtime.active_name = "d"
+        runtime.active_config.return_value.timeouts = {}
+        return _make_tool_fn("a.b.c", schema, {"hosts": ["h1"], "groups": []}, runtime)
+
+    @staticmethod
+    async def _args_for(fn: Any, **call: Any) -> dict[str, Any]:
+        captured: dict[str, Any] = {}
+
+        def fake(**kw: Any) -> dict[str, Any]:
+            captured.update(kw)
+            return {"status": "ok"}
+
+        with (
+            patch("rocannon.ansible.run_module", side_effect=fake),
+            patch("rocannon.ansible.build_inventory_list", return_value=[]),
+            patch("rocannon.ansible.build_envvars", return_value={}),
+        ):
+            await fn(**call)
+        return dict(captured["module_args"])
+
+    async def test_omitted_default_not_sent(self) -> None:
+        args = await self._args_for(self._fn(), target="h1", src="x")
+        assert args == {"src": "x"}
+        assert "block_start_string" not in args
+
+    async def test_explicit_value_is_sent(self) -> None:
+        args = await self._args_for(self._fn(), target="h1", src="x", block_start_string="[%")
+        assert args["block_start_string"] == "[%"
+
+    def test_default_surfaced_in_description(self) -> None:
+        import inspect as _inspect
+
+        fn = self._fn()
+        param = _inspect.signature(fn).parameters["block_start_string"]
+        assert param.default is None
+        assert "{%" in param.annotation.__metadata__[0].description
+
+
 # ---------------------------------------------------------------------------
 # executor.py, _parse_runner_result
 # ---------------------------------------------------------------------------

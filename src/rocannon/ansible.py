@@ -417,6 +417,26 @@ def _sanitize_param_name(name: str, reserved: set[str]) -> str:
     return safe
 
 
+def _optional_param(
+    name: str, py_type: Any, desc: str, doc_default: Any
+) -> tuple[Any, inspect.Parameter]:
+    """Build an optional tool parameter that never forwards the ansible-doc default.
+
+    The Python default is always ``None`` so an omitted argument is dropped by the
+    ``if v is not None`` filter before the module runs, and Ansible applies its own
+    default. Baking the doc default into the signature would forward it as an
+    explicit value, which breaks modules whose defaults are Jinja/shell
+    metacharacters (e.g. ``template``'s ``block_start_string="{%"``). The documented
+    default is surfaced in the description instead.
+    """
+    described = (
+        f"{desc} (Ansible default: {doc_default})".strip() if doc_default is not None else desc
+    )
+    ann = Annotated[py_type | None, Field(description=described)]
+    param = inspect.Parameter(name, inspect.Parameter.KEYWORD_ONLY, annotation=ann, default=None)
+    return ann, param
+
+
 def _register_tool(
     mcp: FastMCP,
     module_name: str,
@@ -506,17 +526,9 @@ def _make_tool_fn(
                 )
             )
         else:
-            optional_type = py_type | None if default is None else py_type
-            ann = Annotated[optional_type, Field(description=desc)]  # type: ignore[misc]
+            ann, param = _optional_param(python_name, py_type, desc, default)
             annotations[python_name] = ann
-            sig_params.append(
-                inspect.Parameter(
-                    python_name,
-                    inspect.Parameter.KEYWORD_ONLY,
-                    annotation=ann,
-                    default=default,
-                )
-            )
+            sig_params.append(param)
 
     if inject_check:
         check_desc = (
@@ -697,18 +709,9 @@ def _make_role_tool_fn(
                 inspect.Parameter(python_name, inspect.Parameter.KEYWORD_ONLY, annotation=ann)
             )
         else:
-            default = p.get("default")
-            optional_type = py_type | None if default is None else py_type
-            ann = Annotated[optional_type, Field(description=desc)]  # type: ignore[misc]
+            ann, param = _optional_param(python_name, py_type, desc, p.get("default"))
             annotations[python_name] = ann
-            sig_params.append(
-                inspect.Parameter(
-                    python_name,
-                    inspect.Parameter.KEYWORD_ONLY,
-                    annotation=ann,
-                    default=default,
-                )
-            )
+            sig_params.append(param)
 
     annotations["ctx"] = Context
     sig_params.append(

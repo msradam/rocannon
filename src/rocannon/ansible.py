@@ -42,6 +42,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("rocannon")
 
+# Tag carried by every reflected module tool. Progressive discovery hides the
+# whole set with mcp.disable(tags={_MODULE_TAG}) and reveals matches per session.
+_MODULE_TAG = "ansible.module"
+
 
 @dataclass
 class AnsibleRegistration:
@@ -101,6 +105,7 @@ def register_ansible_modules(
     report = AnsibleRegistration()
     schema_cache: dict[str, dict[str, Any]] = {}
     ordered = sorted(union_modules)
+
     schemas = fetch_module_schemas(ordered)
     for module_name in ordered:
         schema = schemas.get(module_name)
@@ -116,6 +121,22 @@ def register_ansible_modules(
         except Exception as exc:
             report.tools_failed.append(module_name)
             logger.warning("Failed to register %s: %s", module_name, exc)
+
+    # Progressive discovery hides the module tools behind a search/reveal pair so a
+    # large surface doesn't flood the client, while a revealed tool is still the real
+    # typed module tool (params, choices, safety hints, approval gate) rather than a
+    # generic wrapper. ctx.enable_components reveals matches per session.
+    if runtime.active_config().discovery == "progressive":
+        mcp.disable(tags={_MODULE_TAG})
+        catalog = {n: schema_cache[n]["description"] for n in schema_cache}
+        meta = _register_progressive_meta(mcp, runtime, catalog)
+        report.tools_registered += len(meta)
+        report.tool_names.extend(meta)
+        logger.info(
+            "Progressive discovery: %d module tools hidden behind %d search/reveal tools",
+            len(schema_cache),
+            len(meta),
+        )
 
     # Role tools: a role with an argument_specs.yml is documented by ansible-doc
     # like a module and executed via run_role. Fetch per profile so each
@@ -417,6 +438,65 @@ def _sanitize_param_name(name: str, reserved: set[str]) -> str:
     return safe
 
 
+async def _execute_gated(
+    runtime: RuntimeContext,
+    module_name: str,
+    target: str,
+    module_args: dict[str, Any],
+    *,
+    check: bool,
+    diff: bool,
+    read_only: bool,
+    destructive: bool,
+    ctx: Context | None,
+    meta: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Approval gate then module execution, shared by static tools and ansible_run_module.
+
+    Keeping both paths on one implementation means the human-in-the-loop gate and
+    the execution semantics can't drift between static and progressive discovery.
+    Dry-runs change nothing, so they are never gated.
+    """
+    if not check and _needs_approval(read_only, destructive):
+        approved = await _request_approval(ctx, module_name, target, module_args)
+        if approved is not True:
+            denied = _approval_denied(module_name, target, unsupported=approved is None)
+            if meta is not None:
+                meta["result"] = denied
+                meta["status"] = "denied"
+            return denied
+
+    cfg = runtime.active_config()
+    inventory_list = build_inventory_list(cfg.inventories)
+    envvars = build_envvars(
+        extra_envvars=cfg.extra_envvars,
+        ansible_cfg=cfg.ansible_cfg,
+        vault_password_file=cfg.vault_password_file,
+    )
+    module_timeout = cfg.timeouts.get(module_name)
+
+    if ctx and ctx.request_context:
+        await ctx.info(f"Executing {module_name} on {target} [profile={runtime.active_name}]")
+    else:
+        logger.info("Executing %s on %s [profile=%s]", module_name, target, runtime.active_name)
+
+    result = await asyncio.to_thread(
+        run_module,
+        module=module_name,
+        module_args=module_args,
+        inventory=inventory_list,
+        host_pattern=target,
+        timeout=module_timeout,
+        envvars=envvars,
+        check=check,
+        diff=diff,
+    )
+    if meta is not None:
+        meta["result"] = result
+        meta["status"] = result.get("status", "ok")
+    return result
+
+
 def _optional_param(
     name: str, py_type: Any, desc: str, doc_default: Any
 ) -> tuple[Any, inspect.Parameter]:
@@ -462,7 +542,7 @@ def _register_tool(
     mcp.tool(
         name=module_name,
         description=schema["description"],
-        tags=_tags_for(module_name),
+        tags=_tags_for(module_name) | {_MODULE_TAG},
         annotations=annotations,
         output_schema=_RESULT_SCHEMA,
         meta={"ansible": module_meta} if module_meta else None,
@@ -605,54 +685,95 @@ def _make_tool_fn(
                 meta["status"] = "error"
             return err
 
-        # Human-in-the-loop approval gate. Dry-runs change nothing, so they are
-        # never gated; only state-changing calls require sign-off.
-        if not check and _needs_approval(read_only, destructive):
-            approved = await _request_approval(ctx, module_name, target, module_args)
-            if approved is not True:
-                denied = _approval_denied(module_name, target, unsupported=approved is None)
-                if meta is not None:
-                    meta["result"] = denied
-                    meta["status"] = "denied"
-                return denied
-
-        cfg = runtime.active_config()
-        inventory_list = build_inventory_list(cfg.inventories)
-        envvars = build_envvars(
-            extra_envvars=cfg.extra_envvars,
-            ansible_cfg=cfg.ansible_cfg,
-            vault_password_file=cfg.vault_password_file,
-        )
-        module_timeout = cfg.timeouts.get(module_name)
-
-        if ctx and ctx.request_context:
-            await ctx.info(f"Executing {module_name} on {target} [profile={runtime.active_name}]")
-        else:
-            logger.info("Executing %s on %s [profile=%s]", module_name, target, runtime.active_name)
-
-        result = await asyncio.to_thread(
-            run_module,
-            module=module_name,
-            module_args=module_args,
-            inventory=inventory_list,
-            host_pattern=target,
-            timeout=module_timeout,
-            envvars=envvars,
+        return await _execute_gated(
+            runtime,
+            module_name,
+            target,
+            module_args,
             check=check,
             diff=diff,
+            read_only=read_only,
+            destructive=destructive,
+            ctx=ctx,
+            meta=meta,
         )
-
-        if meta is not None:
-            meta["result"] = result
-            meta["status"] = result.get("status", "ok")
-
-        return result
 
     tool_fn.__annotations__ = annotations
     tool_fn.__signature__ = inspect.Signature(sig_params)  # type: ignore[attr-defined]
     tool_fn.__name__ = module_name.replace(".", "_")
 
     return tool_fn
+
+
+def _register_progressive_meta(
+    mcp: FastMCP,
+    runtime: RuntimeContext,
+    catalog: dict[str, str],
+) -> list[str]:
+    """Register the search/reveal pair for progressive discovery.
+
+    The module tools are already registered (fully typed) but hidden by
+    ``mcp.disable(tags={_MODULE_TAG})``. ``ansible_search_modules`` ranks the
+    catalog; ``ansible_use_module`` reveals a match for the session via
+    ``ctx.enable_components``, after which the model calls the real typed tool
+    directly. ``catalog`` maps fqcn to short description.
+    """
+
+    @mcp.tool(
+        name="ansible_search_modules",
+        description=(
+            "Search this server's Ansible module catalog by capability (e.g. 'copy "
+            "file', 'manage service', 'gather facts'). Returns matching module FQCNs "
+            "with one-line descriptions. Then call ansible_use_module to make one "
+            "callable as a typed tool."
+        ),
+        tags={"rocannon.discovery"},
+        annotations=ToolAnnotations(readOnlyHint=True),
+    )
+    def search_modules(query: str = "", limit: int = 25) -> dict[str, Any]:
+        tokens = [t for t in query.lower().split() if t]
+        scored: list[tuple[int, str]] = []
+        for name in catalog:
+            if not runtime.is_module_active(name):
+                continue
+            if not tokens:
+                scored.append((0, name))
+                continue
+            haystack = f"{name} {catalog[name]}".lower()
+            hits = sum(1 for t in tokens if t in haystack)
+            if hits:
+                # Name matches rank above description-only matches.
+                name_hits = sum(1 for t in tokens if t in name.lower())
+                scored.append((hits * 2 + name_hits, name))
+        scored.sort(key=lambda s: (-s[0], s[1]))
+        modules = [{"module": n, "description": catalog[n]} for _, n in scored[:limit]]
+        return {"count": len(modules), "matched": len(scored), "modules": modules}
+
+    @mcp.tool(
+        name="ansible_use_module",
+        description=(
+            "Reveal an Ansible module as a typed tool for this session. After calling, "
+            "`module` (an FQCN from ansible_search_modules, e.g. ansible.builtin.copy) "
+            "becomes directly callable with its real typed parameters, choices, safety "
+            "hints, and dry-run flags. Find modules with ansible_search_modules first."
+        ),
+        tags={"rocannon.discovery"},
+    )
+    async def use_module(module: str, ctx: Context) -> dict[str, Any]:
+        if module not in catalog:
+            return {
+                "ok": False,
+                "error": f"{module!r} is not in this server's catalog",
+                "hint": "find modules with ansible_search_modules",
+            }
+        await ctx.enable_components(names={module}, components={"tool"})
+        return {
+            "ok": True,
+            "tool": module,
+            "note": f"{module} is now callable as a typed tool in this session.",
+        }
+
+    return ["ansible_search_modules", "ansible_use_module"]
 
 
 def _register_role_tool(

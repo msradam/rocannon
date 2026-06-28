@@ -54,6 +54,13 @@ rocannon repl       --profile .rocannon/quickstart.yml   # operator shell
 - **Reflects your modules.** Each installed module becomes a typed MCP tool, with
   parameters, types, defaults, and choices read from `ansible-doc`. Whatever you
   install shows up automatically.
+- **Scales to whole collections.** Set `discovery: progressive` in a profile and
+  the module tools start hidden behind two: `ansible_search_modules` ranks the
+  catalog by capability, and `ansible_use_module` reveals a match for the session.
+  A revealed module is the real typed tool, same parameters, choices, safety
+  hints, dry-run flags, and approval gate as in static mode, just surfaced on
+  demand so hundreds of modules don't flood the client's context. The default
+  (`static`) registers every module up front, which is best for small profiles.
 - **Reflects your roles.** A role with a `meta/argument_specs.yml` becomes a
   typed tool too; its arguments are the parameters, validated by ansible at run
   time.

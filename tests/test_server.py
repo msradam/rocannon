@@ -82,6 +82,79 @@ def _build_server(inv: Path, modules: list[str]) -> Any:
         return create_server(cfg)
 
 
+def _build_progressive(inv: Path, modules: list[str]) -> Any:
+    """Like _build_server but in progressive-discovery mode (module tools hidden)."""
+    from rocannon.server import create_server
+
+    schemas = {
+        "ansible.builtin.ping": PING_SCHEMA,
+        "ansible.builtin.copy": COPY_SCHEMA,
+        "ansible.builtin.command": COMMAND_SCHEMA,
+    }
+
+    def _fetch(names: list[str]) -> dict[str, Any]:
+        return {n: schemas[n] for n in names if n in schemas}
+
+    with patch("rocannon.ansible.fetch_module_schemas", side_effect=_fetch):
+        cfg = Config(inventories=[inv], modules=modules, discovery="progressive")
+        return create_server(cfg)
+
+
+class TestProgressiveDiscovery:
+    PROFILE = ["ansible.builtin.ping", "ansible.builtin.copy", "ansible.builtin.command"]
+
+    async def test_module_tools_hidden_meta_tools_shown(self, inventory_file: Path) -> None:
+        server = _build_progressive(inventory_file, self.PROFILE)
+        async with Client(server) as client:
+            names = {t.name for t in await client.list_tools()}
+        assert {"ansible_search_modules", "ansible_use_module"} <= names
+        # The real typed module tools exist but are hidden until revealed.
+        assert "ansible.builtin.copy" not in names
+
+    async def test_search_ranks_name_match_first(self, inventory_file: Path) -> None:
+        server = _build_progressive(inventory_file, self.PROFILE)
+        async with Client(server) as client:
+            r = await client.call_tool("ansible_search_modules", {"query": "copy"})
+        assert r.structured_content["modules"][0]["module"] == "ansible.builtin.copy"
+
+    async def test_use_module_reveals_real_typed_tool(self, inventory_file: Path) -> None:
+        server = _build_progressive(inventory_file, self.PROFILE)
+        async with Client(server) as client:
+            u = await client.call_tool("ansible_use_module", {"module": "ansible.builtin.copy"})
+            assert u.structured_content["ok"] is True
+            tools = {t.name: t for t in await client.list_tools()}
+        assert "ansible.builtin.copy" in tools
+        # It is the real typed tool, not a generic wrapper: its own params are present.
+        props = set(tools["ansible.builtin.copy"].inputSchema.get("properties", {}))
+        assert {"src", "dest", "target"} <= props
+
+    async def test_use_module_unknown_errors(self, inventory_file: Path) -> None:
+        server = _build_progressive(inventory_file, self.PROFILE)
+        async with Client(server) as client:
+            u = await client.call_tool("ansible_use_module", {"module": "nope.no.module"})
+        assert u.structured_content["ok"] is False
+
+    async def test_revealed_tool_executes(self, inventory_file: Path) -> None:
+        server = _build_progressive(inventory_file, self.PROFILE)
+        with patch("rocannon.ansible.run_module", return_value=_ok_result()) as mock_run:
+            async with Client(server) as client:
+                await client.call_tool("ansible_use_module", {"module": "ansible.builtin.copy"})
+                r = await client.call_tool(
+                    "ansible.builtin.copy", {"target": "h1", "src": "a", "dest": "b"}
+                )
+        assert mock_run.call_args[1]["module"] == "ansible.builtin.copy"
+        assert mock_run.call_args[1]["module_args"] == {"src": "a", "dest": "b"}
+        assert r.structured_content["status"] == "successful"
+
+    async def test_reveal_does_not_leak_across_sessions(self, inventory_file: Path) -> None:
+        server = _build_progressive(inventory_file, self.PROFILE)
+        async with Client(server) as c1:
+            await c1.call_tool("ansible_use_module", {"module": "ansible.builtin.copy"})
+        async with Client(server) as c2:
+            names = {t.name for t in await c2.list_tools()}
+        assert "ansible.builtin.copy" not in names
+
+
 class TestServerToolRegistration:
     async def test_lists_registered_tools(self, inventory_file: Path) -> None:
         server = _build_server(inventory_file, ["ansible.builtin.ping"])

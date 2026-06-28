@@ -12,10 +12,21 @@ class Config(BaseModel):
     roles: list[str] = []
     roles_path: Path | None = None
     transport: str = "stdio"
+    discovery: str = "static"
     timeouts: dict[str, int] = {}
     ansible_cfg: Path | None = None
     vault_password_file: Path | None = None
     extra_envvars: dict[str, str] = {}
+
+    @field_validator("discovery")
+    @classmethod
+    def discovery_is_known(cls, v: str) -> str:
+        """Pre-register every module as a tool (static) or expose a search/describe/run
+        trio over the catalog (progressive). Progressive suits large module sets that
+        would otherwise flood a client with hundreds of tools."""
+        if v not in ("static", "progressive"):
+            raise ValueError(f"discovery must be 'static' or 'progressive', got {v!r}")
+        return v
 
     @field_validator("inventories")
     @classmethod

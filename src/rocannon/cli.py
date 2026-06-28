@@ -463,20 +463,11 @@ def _ping_check(inv: Path, host: str) -> tuple[_Severity, str]:
     return _Severity.FAIL, f"{host}: unreachable, {tail}"
 
 
-@app.command()
-def doctor(
-    profile: Annotated[str | None, _PROFILE_OPT] = None,
-    inventories: Annotated[list[Path] | None, _INV_OPT] = None,
-    ping: Annotated[
-        bool,
-        typer.Option("--ping/--no-ping", help="Smoke-test SSH connectivity to inventory hosts."),
-    ] = False,
-) -> None:
-    """Preflight checks for Rocannon's dependencies and configuration."""
-    rows: list[tuple[_Severity, str, str]] = []
+_DoctorRow = tuple[_Severity, str, str]
 
-    # Versions
-    rows.append(
+
+def _doctor_versions() -> list[_DoctorRow]:
+    return [
         (
             _Severity.OK,
             "Versions",
@@ -486,69 +477,64 @@ def doctor(
             f"ansible-runner={_pkg_version('ansible-runner')} "
             f"python={sys.version.split()[0]}",
         )
-    )
+    ]
 
-    # Binaries
+
+def _doctor_binaries() -> list[_DoctorRow]:
+    rows: list[_DoctorRow] = []
     for binary in ("ansible-doc", "ansible-runner", "ansible-inventory", "ansible"):
         sev, msg = _binary_check(binary)
         rows.append((sev, "Binaries", msg))
+    return rows
 
-    # Env knobs
+
+def _doctor_env() -> list[_DoctorRow]:
     env_knobs = {k: v for k, v in os.environ.items() if k.startswith(("ROCANNON_", "OTEL_"))}
     env_summary = (
         ", ".join(f"{k}={v}" for k, v in sorted(env_knobs.items())) or "(no ROCANNON_*/OTEL_* set)"
     )
-    rows.append((_Severity.OK, "Env", env_summary))
-    rows.append(
-        (
-            _Severity.OK,
-            "Timeouts",
-            f"timeout={resolve_timeout()}s idle={resolve_idle_timeout()}s",
-        )
-    )
+    return [
+        (_Severity.OK, "Env", env_summary),
+        (_Severity.OK, "Timeouts", f"timeout={resolve_timeout()}s idle={resolve_idle_timeout()}s"),
+    ]
 
-    # Profile / inventories / Ansible config
-    inv_paths: list[Path] = []
-    cfg = None
+
+def _doctor_profile(
+    profile: str | None, inventories: list[Path] | None
+) -> tuple[list[_DoctorRow], Config | None, list[Path]]:
+    """Load the profile (if any), returning its rows plus the config and inventories
+    the later checks need."""
     if profile:
         try:
             cfg = _build_config([], [], profile, "stdio")
-            inv_paths = cfg.inventories
-            rows.append(
-                (
-                    _Severity.OK,
-                    "Profile",
-                    f"{profile}: {len(cfg.modules)} module spec(s), "
-                    f"{len(inv_paths)} inventory file(s)",
-                )
-            )
         except Exception as exc:
-            rows.append((_Severity.FAIL, "Profile", f"{profile}: failed to load, {exc}"))
-    elif inventories:
-        inv_paths = list(inventories)
+            return [(_Severity.FAIL, "Profile", f"{profile}: failed to load, {exc}")], None, []
+        row = (
+            _Severity.OK,
+            "Profile",
+            f"{profile}: {len(cfg.modules)} module spec(s), "
+            f"{len(cfg.inventories)} inventory file(s)",
+        )
+        return [row], cfg, cfg.inventories
+    return [], None, list(inventories) if inventories else []
 
-    # Ansible config: what env will reach the ansible-runner subprocess?
-    inherited = sorted(k for k in os.environ if k.startswith(("ANSIBLE_", "ZOAU_")))
+
+def _doctor_ansible_env(cfg: Config | None) -> list[_DoctorRow]:
+    """What env will reach the ansible-runner subprocess."""
+    rows: list[_DoctorRow] = []
     if cfg is not None and cfg.ansible_cfg:
         rows.append((_Severity.OK, "AnsibleCfg", f"ANSIBLE_CONFIG={cfg.ansible_cfg}"))
     else:
         rows.append(
-            (
-                _Severity.OK,
-                "AnsibleCfg",
-                "(none in profile; ansible's own discovery applies)",
-            )
+            (_Severity.OK, "AnsibleCfg", "(none in profile; ansible's own discovery applies)")
         )
     if cfg is not None and cfg.vault_password_file:
         rows.append(
-            (
-                _Severity.OK,
-                "Vault",
-                f"ANSIBLE_VAULT_PASSWORD_FILE={cfg.vault_password_file}",
-            )
+            (_Severity.OK, "Vault", f"ANSIBLE_VAULT_PASSWORD_FILE={cfg.vault_password_file}")
         )
     else:
         rows.append((_Severity.OK, "Vault", "(no vault_password_file in profile)"))
+    inherited = sorted(k for k in os.environ if k.startswith(("ANSIBLE_", "ZOAU_")))
     rows.append(
         (
             _Severity.OK,
@@ -564,29 +550,48 @@ def doctor(
                 ", ".join(f"{k}={v}" for k, v in sorted(cfg.extra_envvars.items())),
             )
         )
+    return rows
 
+
+def _doctor_connectivity(inv_paths: list[Path]) -> list[_DoctorRow]:
+    rows: list[_DoctorRow] = []
+    for inv in inv_paths:
+        try:
+            proc = subprocess.run(
+                ["ansible-inventory", "-i", str(inv), "--list"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            hosts = list(json.loads(proc.stdout).get("_meta", {}).get("hostvars", {}).keys())
+        except Exception:
+            hosts = []
+        for host in hosts:
+            sev, msg = _ping_check(inv, host)
+            rows.append((sev, "Connectivity", msg))
+    return rows
+
+
+@app.command()
+def doctor(
+    profile: Annotated[str | None, _PROFILE_OPT] = None,
+    inventories: Annotated[list[Path] | None, _INV_OPT] = None,
+    ping: Annotated[
+        bool,
+        typer.Option("--ping/--no-ping", help="Smoke-test SSH connectivity to inventory hosts."),
+    ] = False,
+) -> None:
+    """Preflight checks for Rocannon's dependencies and configuration."""
+    rows: list[_DoctorRow] = _doctor_versions() + _doctor_binaries() + _doctor_env()
+    profile_rows, cfg, inv_paths = _doctor_profile(profile, inventories)
+    rows += profile_rows
+    rows += _doctor_ansible_env(cfg)
     for inv in inv_paths:
         sev, msg = _inventory_check(inv)
         rows.append((sev, "Inventory", msg))
-
-    # Optional connectivity
     if ping and inv_paths:
-        for inv in inv_paths:
-            try:
-                proc = subprocess.run(
-                    ["ansible-inventory", "-i", str(inv), "--list"],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-                hosts = list(json.loads(proc.stdout).get("_meta", {}).get("hostvars", {}).keys())
-            except Exception:
-                hosts = []
-            for host in hosts:
-                sev, msg = _ping_check(inv, host)
-                rows.append((sev, "Connectivity", msg))
+        rows += _doctor_connectivity(inv_paths)
 
-    # Print
     section_width = max(len(s) for _, s, _ in rows)
     for sev, section, msg in rows:
         typer.echo(f"{_MARK[sev]}  {section:<{section_width}}  {msg}")

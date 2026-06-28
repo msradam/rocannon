@@ -1681,9 +1681,47 @@ from rocannon.cli import (  # noqa: E402
     _add_module_param,
     _append_to_record,
     _build_module_parser,
+    _doctor_ansible_env,
+    _doctor_env,
+    _doctor_profile,
+    _doctor_versions,
     _looks_like_fqcn,
     _safe_record_name,
 )
+
+
+class TestDoctorChecks:
+    """cli.py, doctor's section helpers (the subprocess-free ones)."""
+
+    def test_versions_row(self) -> None:
+        rows = _doctor_versions()
+        assert len(rows) == 1
+        sev, section, msg = rows[0]
+        assert section == "Versions"
+        assert "rocannon=" in msg and "python=" in msg
+
+    def test_env_rows(self) -> None:
+        sections = [section for _, section, _ in _doctor_env()]
+        assert sections == ["Env", "Timeouts"]
+
+    def test_profile_none_returns_inventories_only(self, tmp_path: Path) -> None:
+        inv = tmp_path / "hosts"
+        inv.write_text("[g]\nh1\n")
+        rows, cfg, inv_paths = _doctor_profile(None, [inv])
+        assert rows == []
+        assert cfg is None
+        assert inv_paths == [inv]
+
+    def test_profile_load_failure_is_a_fail_row(self) -> None:
+        rows, cfg, inv_paths = _doctor_profile("/no/such/profile.yml", None)
+        assert cfg is None and inv_paths == []
+        assert len(rows) == 1 and rows[0][0].value == "fail"
+
+    def test_ansible_env_defaults_without_config(self) -> None:
+        sections = [section for _, section, _ in _doctor_ansible_env(None)]
+        assert "AnsibleCfg" in sections
+        assert "Vault" in sections
+        assert "Inherited" in sections
 
 
 class TestFqcnRouting:

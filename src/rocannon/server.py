@@ -51,7 +51,7 @@ Module parameters are typed tool arguments derived from `ansible-doc`.
 Required parameters must be provided; optional parameters have defaults shown in the schema.
 
 Tools execute Ansible modules via SSH. Results include:
-- status: "successful" or "failed"
+- status: "successful", "failed", or "denied" (a human declined the approval prompt, do not retry)
 - changed: whether the host state was modified
 - result: full Ansible module output
 - stdout/stderr: command output when applicable

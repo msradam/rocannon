@@ -12,7 +12,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from rocannon.ansible import _build_annotations, _make_tool_fn
+from rocannon.ansible import (
+    _build_annotations,
+    _make_tool_fn,
+    _needs_approval,
+    _request_approval,
+)
 from rocannon.config import Config, load_profile
 from rocannon.correlation import (
     CorrelationFormatter,
@@ -705,6 +710,118 @@ class TestDryRunParams:
         params = _tool_signature(schema)
         assert params["check"].default is False  # the injected dry-run flag
         assert "module_check" in params  # the module's own colliding param
+
+
+class _FakeCtx:
+    """Minimal Context stand-in for the approval gate.
+
+    ``decision`` drives ``elicit``: 'accept', 'reject' (accepted-but-false),
+    'decline', or 'raise' (client cannot elicit).
+    """
+
+    def __init__(self, decision: str) -> None:
+        self.request_context = object()
+        self._decision = decision
+
+    async def info(self, *_a: Any, **_k: Any) -> None:
+        return None
+
+    async def elicit(self, _message: str, **_k: Any) -> Any:
+        from fastmcp.server.elicitation import AcceptedElicitation, DeclinedElicitation
+
+        if self._decision == "raise":
+            raise RuntimeError("client does not support elicitation")
+        if self._decision == "accept":
+            return AcceptedElicitation(data=True)
+        if self._decision == "reject":
+            return AcceptedElicitation(data=False)
+        return DeclinedElicitation()
+
+
+class TestApprovalGate:
+    """ansible.py human-in-the-loop approval gate (ROCANNON_APPROVAL)."""
+
+    def test_mode_off_never_gates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("ROCANNON_APPROVAL", raising=False)
+        assert _needs_approval(read_only=False, destructive=True) is False
+
+    def test_destructive_mode_gates_only_destructive(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ROCANNON_APPROVAL", "destructive")
+        assert _needs_approval(read_only=False, destructive=True) is True
+        assert _needs_approval(read_only=False, destructive=False) is False
+
+    def test_writes_mode_gates_all_non_readonly(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ROCANNON_APPROVAL", "writes")
+        assert _needs_approval(read_only=False, destructive=False) is True
+        assert _needs_approval(read_only=True, destructive=False) is False
+
+    def test_unknown_mode_is_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ROCANNON_APPROVAL", "yolo")
+        assert _needs_approval(read_only=False, destructive=True) is False
+
+    async def test_request_approval_accept_reject_decline(self) -> None:
+        assert await _request_approval(_FakeCtx("accept"), "m", "h1", {}) is True
+        assert await _request_approval(_FakeCtx("reject"), "m", "h1", {}) is False
+        assert await _request_approval(_FakeCtx("decline"), "m", "h1", {}) is False
+
+    async def test_request_approval_unsupported_client_returns_none(self) -> None:
+        assert await _request_approval(_FakeCtx("raise"), "m", "h1", {}) is None
+        assert await _request_approval(None, "m", "h1", {}) is None
+
+    def _destructive_fn(self) -> Any:
+        runtime = MagicMock()
+        runtime.is_module_active.return_value = True
+        runtime.active_name = "default"
+        schema = _schema_with_attrs("none", "none")
+        return _make_tool_fn(
+            "ansible.builtin.command",
+            schema,
+            {"hosts": ["h1"], "groups": []},
+            runtime,
+            destructive=True,
+        )
+
+    async def test_decline_blocks_execution(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ROCANNON_APPROVAL", "destructive")
+        fn = self._destructive_fn()
+        with patch("rocannon.ansible.run_module") as run:
+            result = await fn(target="h1", ctx=_FakeCtx("decline"))
+        run.assert_not_called()
+        assert result["status"] == "denied"
+        assert "declined" in result["stderr"]
+
+    async def test_unsupported_client_fails_closed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ROCANNON_APPROVAL", "destructive")
+        fn = self._destructive_fn()
+        with patch("rocannon.ansible.run_module") as run:
+            result = await fn(target="h1", ctx=_FakeCtx("raise"))
+        run.assert_not_called()
+        assert result["status"] == "denied"
+        assert "does not support elicitation" in result["stderr"]
+
+    async def test_dry_run_is_never_gated(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ROCANNON_APPROVAL", "destructive")
+        schema = _schema_with_attrs("full", "none")
+        runtime = MagicMock()
+        runtime.is_module_active.return_value = True
+        runtime.active_name = "default"
+        runtime.active_config.return_value.timeouts = {}
+        fn = _make_tool_fn(
+            "ansible.builtin.command",
+            schema,
+            {"hosts": ["h1"], "groups": []},
+            runtime,
+            destructive=True,
+        )
+        with (
+            patch("rocannon.ansible.run_module", return_value={"status": "ok"}) as run,
+            patch("rocannon.ansible.build_inventory_list", return_value=[]),
+            patch("rocannon.ansible.build_envvars", return_value={}),
+        ):
+            elicited = _FakeCtx("decline")
+            result = await fn(target="h1", check=True, ctx=elicited)
+        run.assert_called_once()
+        assert result["status"] == "ok"
 
 
 # ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ import asyncio
 import inspect
 import keyword
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Annotated, Any, Literal
@@ -282,6 +283,74 @@ def _build_annotations(module_name: str, attributes: dict[str, Any]) -> ToolAnno
     return None
 
 
+def _needs_approval(read_only: bool, destructive: bool) -> bool:
+    """Decide whether a call must be human-approved before it runs.
+
+    Gated by ``ROCANNON_APPROVAL``: ``off`` (default) never gates, ``destructive``
+    gates only the free-form execution family (command/shell/script/raw, the
+    modules carrying ``destructiveHint``), ``writes`` gates everything that isn't
+    a read-only/fact module. An unknown value is treated as ``off``.
+    """
+    mode = os.environ.get("ROCANNON_APPROVAL", "off").strip().lower()
+    if mode == "destructive":
+        return destructive
+    if mode == "writes":
+        return not read_only
+    return False
+
+
+async def _request_approval(
+    ctx: Context | None,
+    module_name: str,
+    target: str,
+    module_args: dict[str, Any],
+) -> bool | None:
+    """Ask the human (via the MCP client) to approve one module call.
+
+    Returns ``True`` if approved, ``False`` if declined/cancelled, and ``None``
+    if approval could not be requested at all (no context, or the client does
+    not support elicitation). A ``None`` is fail-closed by the caller.
+    """
+    if ctx is None or not ctx.request_context:
+        return None
+    summary = ", ".join(f"{k}={redact({k: v})[k]}" for k, v in module_args.items()) or "(no args)"
+    message = f"Approve running '{module_name}' on target '{target}'?\nArguments: {summary}"
+    try:
+        from fastmcp.server.elicitation import AcceptedElicitation
+
+        # fastmcp 3.4.2's elicit() overloads are broken under mypy (a stray
+        # docstring between @overload stubs hides the non-None overloads), so the
+        # bool response_type resolves to the wrong return type. Bind via Any.
+        elicit: Any = ctx.elicit
+        result = await elicit(
+            message,
+            response_type=bool,
+            response_title="Approve",
+            response_description="Set true to run this on the target, false to abort.",
+        )
+    except Exception:
+        return None
+    return isinstance(result, AcceptedElicitation) and result.data is True
+
+
+def _approval_denied(
+    module_name: str,
+    target: str,
+    *,
+    unsupported: bool,
+) -> dict[str, Any]:
+    """Result returned when a gated call is refused before execution."""
+    if unsupported:
+        stderr = (
+            f"Approval required (ROCANNON_APPROVAL) for {module_name!r} on {target!r}, "
+            "but the MCP client does not support elicitation. Refused to run. Unset "
+            "ROCANNON_APPROVAL or connect with an elicitation-capable client."
+        )
+    else:
+        stderr = f"Operator declined approval for {module_name!r} on {target!r}; not executed."
+    return {"status": "denied", "changed": False, "result": {}, "stdout": "", "stderr": stderr}
+
+
 def _collection_tag(module_name: str) -> str:
     """Extract collection name as a tag: 'ansible.builtin.copy' → 'ansible.builtin'."""
     parts = module_name.rsplit(".", 1)
@@ -362,14 +431,19 @@ def _register_tool(
     re-registering tools. ``inv`` is the union of hosts+groups across every
     profile, used only to build the target parameter's type annotation.
     """
-    fn = _make_tool_fn(module_name, schema, inv, runtime)
+    annotations = _build_annotations(module_name, schema.get("attributes", {}))
+    read_only = bool(annotations and annotations.readOnlyHint)
+    destructive = bool(annotations and annotations.destructiveHint)
+    fn = _make_tool_fn(
+        module_name, schema, inv, runtime, read_only=read_only, destructive=destructive
+    )
 
     module_meta = schema.get("meta") or {}
     mcp.tool(
         name=module_name,
         description=schema["description"],
         tags=_tags_for(module_name),
-        annotations=_build_annotations(module_name, schema.get("attributes", {})),
+        annotations=annotations,
         output_schema=_RESULT_SCHEMA,
         meta={"ansible": module_meta} if module_meta else None,
     )(fn)
@@ -380,6 +454,9 @@ def _make_tool_fn(
     schema: dict[str, Any],
     inv: dict[str, list[str]],
     runtime: RuntimeContext,
+    *,
+    read_only: bool = False,
+    destructive: bool = False,
 ) -> Any:
     """Create an async tool function with a dynamic typed signature matching the Ansible module."""
     target_annotation = _build_target_annotation(inv)
@@ -515,6 +592,17 @@ def _make_tool_fn(
                 meta["result"] = err
                 meta["status"] = "error"
             return err
+
+        # Human-in-the-loop approval gate. Dry-runs change nothing, so they are
+        # never gated; only state-changing calls require sign-off.
+        if not check and _needs_approval(read_only, destructive):
+            approved = await _request_approval(ctx, module_name, target, module_args)
+            if approved is not True:
+                denied = _approval_denied(module_name, target, unsupported=approved is None)
+                if meta is not None:
+                    meta["result"] = denied
+                    meta["status"] = "denied"
+                return denied
 
         cfg = runtime.active_config()
         inventory_list = build_inventory_list(cfg.inventories)
@@ -653,6 +741,17 @@ def _make_role_tool_fn(
                 meta["result"] = err
                 meta["status"] = "error"
             return err
+
+        # A role is an opaque bundle of state-changing tasks with no check mode,
+        # so it is gated under any active approval mode (treated as destructive).
+        if _needs_approval(read_only=False, destructive=True):
+            approved = await _request_approval(ctx, role_name, target, role_args)
+            if approved is not True:
+                denied = _approval_denied(role_name, target, unsupported=approved is None)
+                if meta is not None:
+                    meta["result"] = denied
+                    meta["status"] = "denied"
+                return denied
 
         cfg = runtime.active_config()
         inventory_list = build_inventory_list(cfg.inventories)

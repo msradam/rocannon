@@ -65,6 +65,12 @@ rocannon repl       --profile .rocannon/quickstart.yml   # operator shell
   `ansible-playbook`. Saved sessions also load back as MCP prompts.
 - **Dry runs.** Modules that support check mode expose `--check` and `--diff`,
   both on the CLI and as MCP tool parameters.
+- **Approval gates.** Set `ROCANNON_APPROVAL=destructive` (gate the
+  command/shell/script/raw family) or `=writes` (gate everything that changes
+  state) and Rocannon asks the human to confirm each gated call through the MCP
+  client before it runs, via the protocol's elicitation request. Dry-runs are
+  never gated. If approval is required but the client can't elicit, the call is
+  refused rather than run unattended.
 - **A CLI, too.** Every module is a subcommand:
   `rocannon ansible.builtin.copy --target h1 -i hosts --src a --dest b`.
 
@@ -145,7 +151,7 @@ A few things stand out from this table:
 2. Use Rocannon to act at the OS or config layer (fix the EC2 user data, restart a service, push a patched config file).
 3. Run `commit_session` to save the successful steps as a standard `ansible-playbook`-runnable YAML — no Rocannon needed for the next run.
 
-**What plain Ansible still does better than Rocannon:** multi-host sequencing with `serial`, `throttle`, and `run_once`; approval gates and change-management pipelines; scheduled drift enforcement; versioned roles and collections. Rocannon is for exploration and targeted action. When a task needs to be repeatable and auditable, commit it to a playbook.
+**What plain Ansible still does better than Rocannon:** multi-host sequencing with `serial`, `throttle`, and `run_once`; change-management pipelines; scheduled drift enforcement; versioned roles and collections. Rocannon is for exploration and targeted action. When a task needs to be repeatable and auditable, commit it to a playbook.
 
 ## CLI
 

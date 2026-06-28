@@ -133,6 +133,73 @@ argument_specs document expose no typed interface and are skipped.
 `rocannon://runs` and `rocannon://runs/{request_id}` resources live in
 `server.py`.
 
+## ansible-doc to MCP field mapping
+
+Every label on a tool is a deterministic translation of an `ansible-doc` field.
+Nothing here is written per module: a rule maps a source field to a FastMCP
+channel, and it runs the same way for all of them. FastMCP exposes a tool
+through five channels: `name`, `description`, `tags` (filtering and visibility,
+surfaced to clients under `_meta.fastmcp.tags`), `annotations` (`ToolAnnotations`,
+the part the model reads), and `meta` (free-form reference). Parameters become
+the `inputSchema`; results are described by `output_schema`.
+
+Status legend: **wired** is translated today; **available** is exposed by
+ansible-doc with a usable FastMCP target but not yet stitched; **n/a** has no
+useful target.
+
+**Tool level.**
+
+| ansible-doc field | FastMCP target | rule | status |
+|---|---|---|---|
+| `module` (FQCN) | `name` | as-is | wired |
+| `short_description` | `description` | flattened to one line | wired |
+| `description` (long) | `description` / `meta` | not carried; could append | available |
+| `collection` + FQCN namespace | `tags` | `ansible.builtin`, `ansible` | wired |
+| `attributes.facts` | `annotations.readOnlyHint` | facts module is read-only | wired |
+| `attributes.raw` | `annotations.destructiveHint` + `openWorldHint` | command/shell/script/raw family | wired |
+| `attributes.check_mode` (support) | `annotations.idempotentHint` | `full` and not `raw` implies idempotent | available |
+| `attributes.check_mode` (support) | `check` tool param | gated on full/partial support | wired |
+| `attributes.diff_mode` (support) | `diff` tool param | gated on support | wired |
+| `attributes.platform` | `tags` | `platform:posix` etc. | available |
+| `attributes.{action,async,bypass_host_loop,safe_file_operations,vault}` | `tags` / `meta` | one tag per present attribute | available |
+| `deprecated` (module or param) | `tags` + `meta` | `deprecated` tag; carried in meta | meta wired, tag available |
+| `requirements` | `meta.requirements` | passthrough | wired |
+| `version_added` | `meta.version_added` | passthrough (skips `historical`) | wired |
+| `seealso[].module` | `meta.seealso` | related module names | wired |
+| `return` (key names) | `meta.returns` | sorted key list | wired |
+| `author` | `meta` | not carried | available |
+| `notes` | `description` / `meta` | not carried | available |
+| `examples` (entry level) | playbook prompt scaffold | not carried | available |
+| `has_action`, `filename`, `plugin_name`, `metadata` | none | internal to ansible-doc | n/a |
+| (none in ansible-doc) | `annotations.title` | no source; FQCN is the name | n/a |
+
+**Parameter level** (`doc.options[*]` to one `inputSchema` property, in `schema._parse_parameter` and `ansible._make_tool_fn`):
+
+| ansible-doc field | FastMCP target | rule | status |
+|---|---|---|---|
+| option name | property name | sanitized for Python/JSON, de-mangled on call | wired |
+| `type` | JSON Schema type | `ANSIBLE_TYPE_MAP` | wired |
+| `elements` | array item type | for `type: list` | wired |
+| `choices` | enum | `Literal[...]` | wired |
+| `required` | `required` list | as-is | wired |
+| `default` | property description | rendered as "(Ansible default: x)", never the schema default (see sharp edges) | wired |
+| `description` | property description | flattened | wired |
+| `aliases` | property description | appended | wired |
+| `deprecated` (param) | property description | `[DEPRECATED: ...]` appended | wired |
+| `suboptions` | property description | flattened inline | wired |
+| `version_added` (param) | none | not carried | available |
+
+**Result level.** Tools declare a fixed `output_schema` (the `status`/`changed`/
+`result`/`stdout`/`stderr` envelope). The ansible-doc `return` block, which types
+and describes each returned key, currently contributes only its key names to
+`meta.returns`. Turning that block into a per-module typed `result` sub-schema is
+available but not wired.
+
+**Out of band.** Value-level destructiveness (`state: absent`, `force: true`,
+`state: restarted`) is not in the `attributes` block, so no label channel can
+derive it from ansible-doc. It needs a parameter-value rule, tracked separately
+from this field mapping.
+
 ## The MCP server layer
 
 `src/rocannon/server.py` builds the FastMCP server and wires the middleware

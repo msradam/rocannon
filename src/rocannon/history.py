@@ -51,7 +51,3 @@ class RunHistory:
         with self._lock:
             items = list(self._entries.values())
         return items[-limit:] if limit else items
-
-    def clear(self) -> None:
-        with self._lock:
-            self._entries.clear()

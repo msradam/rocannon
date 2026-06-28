@@ -37,7 +37,7 @@ classifiers = [
 # the ansible-doc/ansible-inventory CLIs via subprocess and ansible-runner
 # (Apache-2.0) as a library.
 dependencies = [
-    "ansible-core>=2.21.0",
+    "ansible-core>=2.21.1",
     "ansible-runner>=2.4.3",
     "fastmcp>=3.4.2",
     "prompt_toolkit>=3.0.52",

@@ -164,7 +164,7 @@ surveyed with zero fetch failures. Counts in parentheses are how many of the
 | `collection` + FQCN namespace | `tags` | `ansible.builtin`, `ansible` | wired |
 | `attributes.facts` (17) | `annotations.readOnlyHint` | facts module is read-only | wired |
 | `attributes.raw` (4) | `annotations.destructiveHint` + `openWorldHint` | command/shell/script/raw family | wired |
-| `attributes.idempotent` (83) | `annotations.idempotentHint` | direct: `support == full`. Falls back to `check_mode == full and not raw` for the modules that omit it | available |
+| `attributes.idempotent` (83) | `annotations.idempotentHint` | direct: `support == full` true, `none` false. Falls back to `check_mode == full and not raw` for the modules that omit it | wired |
 | `attributes.check_mode` (806) | `check` tool param | gated on full/partial support | wired |
 | `attributes.diff_mode` (727) | `diff` tool param | gated on support | wired |
 | `attributes.action_group` (136) | `tags` | group membership, e.g. `action_group:aws` | available |

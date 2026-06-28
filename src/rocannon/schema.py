@@ -273,9 +273,9 @@ def _build_meta(module_doc: dict[str, Any], doc_entry: dict[str, Any]) -> dict[s
 def _parse_attributes(attributes: dict[str, Any]) -> dict[str, Any]:
     """Pull the execution-relevant flags out of ansible-doc's attributes block.
 
-    ``check_mode``/``diff_mode`` carry a ``support`` level (full/partial/none);
-    ``facts`` and ``raw`` are presence flags. These drive the MCP tool hints and
-    the dry-run parameters built in ``rocannon.ansible``.
+    ``check_mode``/``diff_mode``/``idempotent`` carry a ``support`` level
+    (full/partial/none/N/A); ``facts`` and ``raw`` are presence flags. These drive
+    the MCP tool hints and the dry-run parameters built in ``rocannon.ansible``.
     """
 
     def support(key: str) -> str | None:
@@ -285,6 +285,7 @@ def _parse_attributes(attributes: dict[str, Any]) -> dict[str, Any]:
     return {
         "check_mode": support("check_mode"),
         "diff_mode": support("diff_mode"),
+        "idempotent": support("idempotent"),
         "facts": "facts" in attributes,
         "raw": "raw" in attributes,
     }

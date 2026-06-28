@@ -281,15 +281,36 @@ _READ_ONLY_BUILTINS: frozenset[str] = frozenset(
 _SUPPORTED_LEVELS = frozenset({"full", "partial"})
 
 
+def _idempotent_hint(attributes: dict[str, Any]) -> bool | None:
+    """Derive MCP ``idempotentHint`` from ansible-doc attributes.
+
+    ansible-doc exposes an ``idempotent`` attribute on some modules (support
+    full/partial/none/N/A): ``full`` is idempotent, ``none`` is not, the rest are
+    ambiguous. For the modules that omit it, full check-mode support is a reliable
+    proxy: a module that can fully predict its change in check mode is declarative,
+    so applying it twice is a no-op.
+    """
+    idem = attributes.get("idempotent")
+    if idem == "full":
+        return True
+    if idem == "none":
+        return False
+    if idem in ("partial", "N/A"):
+        return None
+    if attributes.get("check_mode") == "full" and not attributes.get("raw"):
+        return True
+    return None
+
+
 def _build_annotations(module_name: str, attributes: dict[str, Any]) -> ToolAnnotations | None:
     """Map ansible-doc module attributes to MCP tool hints.
 
     Read-only: fact-gathering modules (the ``facts`` attribute), the
     ``_info``/``_facts`` naming convention, and a few builtins that only query
     state. Destructive and open-world: the free-form execution family (command,
-    shell, script, raw), which ansible-doc flags with the ``raw`` attribute.
-    Everything else is left unannotated; ansible-doc carries no idempotency
-    signal that would justify a stronger claim.
+    shell, script, raw), which ansible-doc flags with the ``raw`` attribute, and
+    which is never idempotent. Otherwise carry ``idempotentHint`` when the source
+    supports it (see ``_idempotent_hint``).
     """
     short = module_name.rsplit(".", 1)[-1]
     read_only = (
@@ -300,7 +321,10 @@ def _build_annotations(module_name: str, attributes: dict[str, Any]) -> ToolAnno
     if read_only:
         return ToolAnnotations(readOnlyHint=True)
     if attributes.get("raw"):
-        return ToolAnnotations(destructiveHint=True, openWorldHint=True)
+        return ToolAnnotations(destructiveHint=True, openWorldHint=True, idempotentHint=False)
+    hint = _idempotent_hint(attributes)
+    if hint is not None:
+        return ToolAnnotations(idempotentHint=hint)
     return None
 
 

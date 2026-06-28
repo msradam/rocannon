@@ -622,10 +622,14 @@ class TestParseAttributes:
         assert attrs["facts"] is True
         assert attrs["raw"] is True
 
+    def test_idempotent_support_extracted(self) -> None:
+        assert _parse_attributes({"idempotent": {"support": "full"}})["idempotent"] == "full"
+
     def test_missing_attributes_default_to_none_and_false(self) -> None:
         assert _parse_attributes({}) == {
             "check_mode": None,
             "diff_mode": None,
+            "idempotent": None,
             "facts": False,
             "raw": False,
         }
@@ -649,15 +653,29 @@ class TestBuildAnnotations:
         assert ann is not None
         assert ann.readOnlyHint is True
 
-    def test_raw_family_is_destructive_and_open_world(self) -> None:
+    def test_raw_family_is_destructive_open_world_and_not_idempotent(self) -> None:
         ann = _build_annotations("ansible.builtin.command", {"raw": True})
         assert ann is not None
         assert ann.destructiveHint is True
         assert ann.openWorldHint is True
         assert ann.readOnlyHint is None
+        assert ann.idempotentHint is False
 
-    def test_plain_state_module_is_unannotated(self) -> None:
-        assert _build_annotations("ansible.builtin.copy", {"check_mode": "full"}) is None
+    def test_idempotent_attribute_drives_hint(self) -> None:
+        full = _build_annotations("c.g.thing", {"idempotent": "full"})
+        assert full is not None and full.idempotentHint is True
+        none = _build_annotations("c.g.thing", {"idempotent": "none"})
+        assert none is not None and none.idempotentHint is False
+
+    def test_full_check_mode_implies_idempotent_when_attribute_absent(self) -> None:
+        ann = _build_annotations("ansible.builtin.copy", {"check_mode": "full"})
+        assert ann is not None
+        assert ann.idempotentHint is True
+
+    def test_partial_or_unknown_idempotency_stays_unannotated(self) -> None:
+        assert _build_annotations("c.g.thing", {"idempotent": "partial"}) is None
+        assert _build_annotations("c.g.thing", {"check_mode": "partial"}) is None
+        assert _build_annotations("c.g.thing", {}) is None
 
 
 def _tool_signature(schema: dict[str, Any]) -> Any:

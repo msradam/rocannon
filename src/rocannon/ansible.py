@@ -392,7 +392,12 @@ def _approval_denied(
             "ROCANNON_APPROVAL or connect with an elicitation-capable client."
         )
     else:
-        stderr = f"Operator declined approval for {module_name!r} on {target!r}; not executed."
+        # A decline and a non-interactive client's auto-decline both arrive as
+        # DeclinedElicitation, so this message must not claim a human reviewed it.
+        stderr = (
+            f"Approval not granted for {module_name!r} on {target!r} "
+            "(declined, or no interactive approver available); not executed."
+        )
     return {"status": "denied", "changed": False, "result": {}, "stdout": "", "stderr": stderr}
 
 

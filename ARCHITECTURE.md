@@ -147,6 +147,13 @@ Status legend: **wired** is translated today; **available** is exposed by
 ansible-doc with a usable FastMCP target but not yet stitched; **n/a** has no
 useful target.
 
+The field and attribute vocabulary below is the observed superset across all
+1177 installed modules (19 collections: ansible.builtin, community.general,
+amazon.aws, cisco.ios, arista.eos, ibm.ibm_zos_core, kubernetes.core, and more),
+surveyed with zero fetch failures. Counts in parentheses are how many of the
+1177 modules carry the field. Attribute `support` is one of `full`, `partial`,
+`none`, or `N/A`.
+
 **Tool level.**
 
 | ansible-doc field | FastMCP target | rule | status |
@@ -155,22 +162,23 @@ useful target.
 | `short_description` | `description` | flattened to one line | wired |
 | `description` (long) | `description` / `meta` | not carried; could append | available |
 | `collection` + FQCN namespace | `tags` | `ansible.builtin`, `ansible` | wired |
-| `attributes.facts` | `annotations.readOnlyHint` | facts module is read-only | wired |
-| `attributes.raw` | `annotations.destructiveHint` + `openWorldHint` | command/shell/script/raw family | wired |
-| `attributes.check_mode` (support) | `annotations.idempotentHint` | `full` and not `raw` implies idempotent | available |
-| `attributes.check_mode` (support) | `check` tool param | gated on full/partial support | wired |
-| `attributes.diff_mode` (support) | `diff` tool param | gated on support | wired |
-| `attributes.platform` | `tags` | `platform:posix` etc. | available |
-| `attributes.{action,async,bypass_host_loop,safe_file_operations,vault}` | `tags` / `meta` | one tag per present attribute | available |
-| `deprecated` (module or param) | `tags` + `meta` | `deprecated` tag; carried in meta | meta wired, tag available |
-| `requirements` | `meta.requirements` | passthrough | wired |
-| `version_added` | `meta.version_added` | passthrough (skips `historical`) | wired |
-| `seealso[].module` | `meta.seealso` | related module names | wired |
+| `attributes.facts` (17) | `annotations.readOnlyHint` | facts module is read-only | wired |
+| `attributes.raw` (4) | `annotations.destructiveHint` + `openWorldHint` | command/shell/script/raw family | wired |
+| `attributes.idempotent` (83) | `annotations.idempotentHint` | direct: `support == full`. Falls back to `check_mode == full and not raw` for the modules that omit it | available |
+| `attributes.check_mode` (806) | `check` tool param | gated on full/partial support | wired |
+| `attributes.diff_mode` (727) | `diff` tool param | gated on support | wired |
+| `attributes.action_group` (136) | `tags` | group membership, e.g. `action_group:aws` | available |
+| `attributes.platform` (72) | `tags` | `platform:posix`; value is a (sometimes comma-joined) platforms string | available |
+| `attributes.{action,async,bypass_host_loop,bypass_task_loop,become,connection,delegation,core,ignore_conditional,tags,until,safe_file_operations,vault}` | `tags` / `meta` | one tag per present attribute with its support level | available |
+| `deprecated` (27 modules; also per-param) | `tags` + `meta` | `deprecated` tag; carried in meta | meta wired, tag available |
+| `requirements` (683) | `meta.requirements` | passthrough | wired |
+| `version_added` (681) + `version_added_collection` | `meta.version_added` | passthrough (skips `historical`) | wired |
+| `seealso[].module` (190) | `meta.seealso` | related module names | wired |
 | `return` (key names) | `meta.returns` | sorted key list | wired |
-| `author` | `meta` | not carried | available |
-| `notes` | `description` / `meta` | not carried | available |
-| `examples` (entry level) | playbook prompt scaffold | not carried | available |
-| `has_action`, `filename`, `plugin_name`, `metadata` | none | internal to ansible-doc | n/a |
+| `author` (1177) | `meta` | not carried | available |
+| `notes` (770) | `description` / `meta` | not carried | available |
+| `examples` (1177, entry level) | playbook prompt scaffold | not carried | available |
+| `has_action`, `filename`, `plugin_name`, `metadata`, `todo` | none | internal to ansible-doc | n/a |
 | (none in ansible-doc) | `annotations.title` | no source; FQCN is the name | n/a |
 
 **Parameter level** (`doc.options[*]` to one `inputSchema` property, in `schema._parse_parameter` and `ansible._make_tool_fn`):
@@ -186,12 +194,13 @@ useful target.
 | `description` | property description | flattened | wired |
 | `aliases` | property description | appended | wired |
 | `deprecated` (param) | property description | `[DEPRECATED: ...]` appended | wired |
-| `suboptions` | property description | flattened inline | wired |
-| `version_added` (param) | none | not carried | available |
+| `suboptions` | property description | flattened inline; nests recursively (247 modules have suboptions, some many levels deep), only the first level is rendered | wired |
+| `version_added` / `version_added_collection` (param) | none | not carried | available |
 
 **Result level.** Tools declare a fixed `output_schema` (the `status`/`changed`/
-`result`/`stdout`/`stderr` envelope). The ansible-doc `return` block, which types
-and describes each returned key, currently contributes only its key names to
+`result`/`stdout`/`stderr` envelope). The ansible-doc `return` block is fully
+typed (each key carries `description`, `returned`, `type`, `sample`, and nests via
+`contains`/`elements`), but currently only its top-level key names reach
 `meta.returns`. Turning that block into a per-module typed `result` sub-schema is
 available but not wired.
 

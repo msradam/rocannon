@@ -96,12 +96,25 @@ def run_module(
     envvars: dict[str, str] | None = None,
     check: bool = False,
     diff: bool = False,
+    execution_environment: str | None = None,
+    execution_environment_engine: str = "podman",
+    execution_environment_container_options: list[str] | None = None,
 ) -> dict[str, Any]:
     """Execute an Ansible module via ansible-runner and return structured results.
 
     ``check`` runs the play in Ansible check mode (dry-run, no changes applied);
     ``diff`` asks modules to report what they would change. Both are play-level
     keywords, gated per module by the caller against ansible-doc support levels.
+
+    ``execution_environment``, when set, dispatches the run into that container
+    image instead of the local process, via ansible-runner's own
+    ``process_isolation``/``container_image`` support (the same mechanism AWX
+    and ``ansible-navigator`` use). ``execution_environment_engine`` selects the
+    container engine (``podman`` or ``docker``); ``execution_environment_container_options``
+    passes extra args straight to that engine's ``run`` invocation (for example
+    ``["--network", "my-compose-net"]`` so the container can reach other
+    services by name). Collection Python dependencies then live in the image,
+    not in Rocannon's own control-side environment.
     """
     if timeout is None:
         timeout = resolve_timeout()
@@ -135,15 +148,24 @@ def run_module(
         yaml.dump([play], f)
         playbook_path = f.name
 
-    try:
-        runner = ansible_runner.run(
-            playbook=playbook_path,
-            inventory=abs_inventory,
-            quiet=True,
-            timeout=timeout,
-            settings={"idle_timeout": idle_timeout},
-            envvars=envvars,
+    runner_kwargs: dict[str, Any] = {
+        "playbook": playbook_path,
+        "inventory": abs_inventory,
+        "quiet": True,
+        "timeout": timeout,
+        "settings": {"idle_timeout": idle_timeout},
+        "envvars": envvars,
+    }
+    if execution_environment:
+        runner_kwargs.update(
+            process_isolation=True,
+            process_isolation_executable=execution_environment_engine,
+            container_image=execution_environment,
+            container_options=execution_environment_container_options or None,
         )
+
+    try:
+        runner = ansible_runner.run(**runner_kwargs)
     except Exception as exc:
         return {
             "status": "error",

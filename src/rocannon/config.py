@@ -17,6 +17,9 @@ class Config(BaseModel):
     ansible_cfg: Path | None = None
     vault_password_file: Path | None = None
     extra_envvars: dict[str, str] = {}
+    execution_environment: str | None = None
+    execution_environment_engine: str = "podman"
+    execution_environment_container_options: list[str] = []
 
     @field_validator("discovery")
     @classmethod

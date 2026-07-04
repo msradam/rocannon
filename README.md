@@ -113,6 +113,17 @@ roles_path: ./roles         # optional, for standalone (non-collection) roles
   directory name together with `roles_path` (which resolves against the profile's
   own directory). Roles without an argument spec are skipped.
 - Optional keys: `ansible_cfg`, `vault_password_file`, `extra_envvars`.
+- **`execution_environment`** dispatches module execution into a container image
+  (built with `ansible-builder`) instead of Rocannon's own process, via
+  `ansible-runner`'s native `process_isolation`/`container_image` support.
+  `execution_environment_engine` picks the container engine (`podman`,
+  default, or `docker`), and `execution_environment_container_options` passes
+  extra args straight to it (for example `["--network", "my-compose-net"]` so
+  the container can reach other services by name). Collection Python
+  dependencies (`psycopg2` for `community.postgresql`, the `docker` SDK for
+  `community.docker`, and so on) then live in the image, baked in by
+  `ansible-builder` from each collection's own declared requirements, not in
+  Rocannon's control-side environment.
 
 Drop multiple profiles in `.rocannon/profiles/` (with a `default.yml`) and switch
 at runtime via the `rocannon_list_profiles`, `rocannon_current_profile`, and

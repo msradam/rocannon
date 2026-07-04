@@ -519,6 +519,9 @@ async def _execute_gated(
         envvars=envvars,
         check=check,
         diff=diff,
+        execution_environment=cfg.execution_environment,
+        execution_environment_engine=cfg.execution_environment_engine,
+        execution_environment_container_options=cfg.execution_environment_container_options,
     )
     if meta is not None:
         meta["result"] = result

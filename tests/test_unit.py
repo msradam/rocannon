@@ -145,6 +145,29 @@ class TestConfig:
         config = load_profile(profile, transport="http")
         assert config.transport == "http"
 
+    def test_execution_environment_defaults_to_local_execution(self, tmp_path: Path) -> None:
+        inv = tmp_path / "inv.yml"
+        inv.write_text("all:\n  hosts:\n    localhost:\n")
+        config = Config(inventories=[inv], modules=["ansible.builtin.ping"])
+        assert config.execution_environment is None
+        assert config.execution_environment_engine == "podman"
+        assert config.execution_environment_container_options == []
+
+    def test_execution_environment_from_profile(self, tmp_path: Path) -> None:
+        inv = tmp_path / "inv.yml"
+        inv.write_text("all:\n  hosts:\n    localhost:\n")
+        profile = tmp_path / "profile.yml"
+        profile.write_text(
+            f"inventories:\n  - {inv}\nmodules:\n  - ansible.builtin.ping\n"
+            "execution_environment: my-ee:latest\n"
+            "execution_environment_engine: docker\n"
+            "execution_environment_container_options:\n  - --network\n  - my-net\n"
+        )
+        config = load_profile(profile)
+        assert config.execution_environment == "my-ee:latest"
+        assert config.execution_environment_engine == "docker"
+        assert config.execution_environment_container_options == ["--network", "my-net"]
+
     def test_inventories_resolved_to_absolute(self, tmp_path: Path) -> None:
         inv = tmp_path / "inv.yml"
         inv.write_text("all:\n  hosts:\n    localhost:\n")
@@ -1179,6 +1202,65 @@ class TestRunModule:
         monkeypatch.setenv("ROCANNON_IDLE_TIMEOUT", "")
         assert resolve_timeout() == DEFAULT_TIMEOUT
         assert resolve_idle_timeout() == DEFAULT_IDLE_TIMEOUT
+
+    def test_no_execution_environment_runs_local_by_default(self, tmp_path: Path) -> None:
+        """Without execution_environment, no process_isolation kwargs are passed at all."""
+        runner = _make_runner(events=[_host_event("localhost")])
+        with patch("rocannon.executor.ansible_runner.run", return_value=runner) as mock_run:
+            run_module(
+                module="ansible.builtin.ping",
+                module_args={},
+                inventory=[str(tmp_path)],
+                host_pattern="localhost",
+            )
+        call_kwargs = mock_run.call_args[1]
+        assert "process_isolation" not in call_kwargs
+        assert "container_image" not in call_kwargs
+
+    def test_execution_environment_dispatches_into_container(self, tmp_path: Path) -> None:
+        runner = _make_runner(events=[_host_event("localhost")])
+        with patch("rocannon.executor.ansible_runner.run", return_value=runner) as mock_run:
+            run_module(
+                module="community.postgresql.postgresql_info",
+                module_args={},
+                inventory=[str(tmp_path)],
+                host_pattern="localhost",
+                execution_environment="hekaton2-ee-agent:latest",
+                execution_environment_engine="docker",
+                execution_environment_container_options=["--network", "my-net"],
+            )
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs["process_isolation"] is True
+        assert call_kwargs["process_isolation_executable"] == "docker"
+        assert call_kwargs["container_image"] == "hekaton2-ee-agent:latest"
+        assert call_kwargs["container_options"] == ["--network", "my-net"]
+
+    def test_execution_environment_engine_defaults_to_podman(self, tmp_path: Path) -> None:
+        runner = _make_runner(events=[_host_event("localhost")])
+        with patch("rocannon.executor.ansible_runner.run", return_value=runner) as mock_run:
+            run_module(
+                module="ansible.builtin.ping",
+                module_args={},
+                inventory=[str(tmp_path)],
+                host_pattern="localhost",
+                execution_environment="some-ee:latest",
+            )
+        assert mock_run.call_args[1]["process_isolation_executable"] == "podman"
+
+    def test_no_container_options_passes_none_not_empty_list(self, tmp_path: Path) -> None:
+        """An empty/absent container_options list must become None, not [], so
+        ansible-runner's own falsy-check for "no extra container args" still holds."""
+        runner = _make_runner(events=[_host_event("localhost")])
+        with patch("rocannon.executor.ansible_runner.run", return_value=runner) as mock_run:
+            run_module(
+                module="ansible.builtin.ping",
+                module_args={},
+                inventory=[str(tmp_path)],
+                host_pattern="localhost",
+                execution_environment="some-ee:latest",
+                execution_environment_container_options=[],
+            )
+        assert mock_run.call_args[1]["container_options"] is None
 
 
 class TestRunModuleCheckDiff:

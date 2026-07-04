@@ -193,26 +193,33 @@ def run_module(
         )
 
     try:
-        runner = ansible_runner.run(**runner_kwargs)
-    except Exception as exc:
-        return {
-            "status": "error",
-            "changed": False,
-            "result": {},
-            "stdout": "",
-            "stderr": redact_text(str(exc)),
-        }
+        try:
+            runner = ansible_runner.run(**runner_kwargs)
+        except Exception as exc:
+            return {
+                "status": "error",
+                "changed": False,
+                "result": {},
+                "stdout": "",
+                "stderr": redact_text(str(exc)),
+            }
+
+        # runner.events reads job_events/*.json lazily from private_data_dir on
+        # each access, so parsing must happen before cleanup, not after: an
+        # earlier version of this function cleaned up in this try's finally,
+        # which deleted the artifacts directory before _parse_runner_result
+        # ever read it and turned every containerized run into an
+        # AnsibleRunnerException.
+        result = _parse_runner_result(runner)
+        if check:
+            result["check_mode"] = True
+        return result
     finally:
         with contextlib.suppress(Exception):
             if private_data_dir:
                 shutil.rmtree(private_data_dir)
             else:
                 Path(playbook_path).unlink()
-
-    result = _parse_runner_result(runner)
-    if check:
-        result["check_mode"] = True
-    return result
 
 
 def run_role(

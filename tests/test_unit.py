@@ -1337,6 +1337,41 @@ class TestRunModule:
         assert result["status"] == "error"
         assert not Path(captured["private_data_dir"]).exists()
 
+    def test_events_parsed_before_private_data_dir_cleanup(self, tmp_path: Path) -> None:
+        """Regression: runner.events reads job_events/*.json lazily from
+        private_data_dir on each access. Cleaning up private_data_dir before
+        _parse_runner_result reads .events turns every containerized run into
+        an AnsibleRunnerException. A lazy-property double models that here
+        instead of the plain-list _make_runner stub, so this fails the way
+        the real bug did if the ordering regresses."""
+        captured: dict[str, Any] = {}
+
+        class LazyEventsRunner:
+            status = "successful"
+            stdout = MagicMock(read=lambda: "")
+            stderr = MagicMock(read=lambda: "")
+
+            @property
+            def events(self) -> list[dict[str, Any]]:
+                pdd = captured["private_data_dir"]
+                if not Path(pdd).exists():
+                    raise RuntimeError(f"events directory is missing: {pdd}/artifacts/x/job_events")
+                return [_host_event("localhost")]
+
+        def fake_run(**kwargs: Any) -> Any:
+            captured["private_data_dir"] = kwargs["private_data_dir"]
+            return LazyEventsRunner()
+
+        with patch("rocannon.executor.ansible_runner.run", side_effect=fake_run):
+            result = run_module(
+                module="ansible.builtin.ping",
+                module_args={},
+                inventory=[str(tmp_path)],
+                host_pattern="localhost",
+                execution_environment="some-ee:latest",
+            )
+        assert result["status"] == "successful"
+
 
 class TestRunModuleCheckDiff:
     """check/diff become play-level keywords and mark the result."""

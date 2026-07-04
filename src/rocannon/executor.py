@@ -1,5 +1,6 @@
 import contextlib
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -144,12 +145,38 @@ def run_module(
     if diff:
         play["diff"] = True
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
-        yaml.dump([play], f)
-        playbook_path = f.name
+    private_data_dir: str | None = None
+    if execution_environment:
+        # ansible-runner bind-mounts private_data_dir into the container and,
+        # once containerized, hardcodes the in-container inventory path to
+        # private_data_dir/inventory regardless of what `inventory=` is passed
+        # (RunnerConfig.prepare_inventory). So both the playbook and every
+        # inventory source must live inside private_data_dir to be visible to
+        # the container at all; a bare tempfile elsewhere is invisible to it
+        # (and, under a VM-backed engine like Colima, may not even be on a
+        # host path the VM shares).
+        private_data_dir = tempfile.mkdtemp(prefix="rocannon_ee_")
+        project_dir = os.path.join(private_data_dir, "project")
+        os.makedirs(project_dir, exist_ok=True)
+        playbook_path = os.path.join(project_dir, "playbook.yml")
+        with open(playbook_path, "w") as f:
+            yaml.dump([play], f)
+
+        inventory_dir = os.path.join(private_data_dir, "inventory")
+        os.makedirs(inventory_dir, exist_ok=True)
+        for src in abs_inventory:
+            dest = os.path.join(inventory_dir, os.path.basename(src))
+            if os.path.isdir(src):
+                shutil.copytree(src, dest, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src, dest)
+    else:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+            yaml.dump([play], f)
+            playbook_path = f.name
 
     runner_kwargs: dict[str, Any] = {
-        "playbook": playbook_path,
+        "playbook": "playbook.yml" if execution_environment else playbook_path,
         "inventory": abs_inventory,
         "quiet": True,
         "timeout": timeout,
@@ -158,6 +185,7 @@ def run_module(
     }
     if execution_environment:
         runner_kwargs.update(
+            private_data_dir=private_data_dir,
             process_isolation=True,
             process_isolation_executable=execution_environment_engine,
             container_image=execution_environment,
@@ -176,7 +204,10 @@ def run_module(
         }
     finally:
         with contextlib.suppress(Exception):
-            Path(playbook_path).unlink()
+            if private_data_dir:
+                shutil.rmtree(private_data_dir)
+            else:
+                Path(playbook_path).unlink()
 
     result = _parse_runner_result(runner)
     if check:

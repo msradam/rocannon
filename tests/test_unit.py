@@ -1262,6 +1262,81 @@ class TestRunModule:
             )
         assert mock_run.call_args[1]["container_options"] is None
 
+    def test_execution_environment_uses_private_data_dir_with_project_playbook(
+        self, tmp_path: Path
+    ) -> None:
+        """ansible-runner hardcodes the in-container inventory path to
+        private_data_dir/inventory once containerized, regardless of the
+        `inventory=` kwarg (RunnerConfig.prepare_inventory), so both the
+        playbook and every inventory source must actually live under
+        private_data_dir for the container to see them at all."""
+        inv = tmp_path / "hosts.yml"
+        inv.write_text("all:\n  hosts:\n    localhost:\n")
+        captured: dict[str, Any] = {}
+
+        def fake_run(**kwargs: Any) -> Any:
+            captured["kwargs"] = kwargs
+            pdd = Path(kwargs["private_data_dir"])
+            captured["playbook_exists"] = (pdd / "project" / "playbook.yml").is_file()
+            captured["inventory_content"] = (pdd / "inventory" / "hosts.yml").read_text()
+            return _make_runner(events=[_host_event("localhost")])
+
+        with patch("rocannon.executor.ansible_runner.run", side_effect=fake_run):
+            run_module(
+                module="community.postgresql.postgresql_info",
+                module_args={"login_host": "postgres"},
+                inventory=[str(inv)],
+                host_pattern="localhost",
+                execution_environment="hekaton2-ee-agent:latest",
+                execution_environment_engine="docker",
+            )
+        assert captured["kwargs"]["playbook"] == "playbook.yml"
+        assert captured["playbook_exists"] is True
+        assert captured["inventory_content"] == inv.read_text()
+        # cleaned up afterward, same as the non-EE tempfile path
+        assert not Path(captured["kwargs"]["private_data_dir"]).exists()
+
+    def test_execution_environment_copies_directory_inventory(self, tmp_path: Path) -> None:
+        inv_dir = tmp_path / "inventories"
+        inv_dir.mkdir()
+        (inv_dir / "hosts.yml").write_text("all:\n  hosts:\n    localhost:\n")
+        captured: dict[str, Any] = {}
+
+        def fake_run(**kwargs: Any) -> Any:
+            pdd = Path(kwargs["private_data_dir"])
+            captured["copied"] = (pdd / "inventory" / "inventories" / "hosts.yml").is_file()
+            return _make_runner(events=[_host_event("localhost")])
+
+        with patch("rocannon.executor.ansible_runner.run", side_effect=fake_run):
+            run_module(
+                module="ansible.builtin.ping",
+                module_args={},
+                inventory=[str(inv_dir)],
+                host_pattern="localhost",
+                execution_environment="some-ee:latest",
+            )
+        assert captured["copied"] is True
+
+    def test_execution_environment_cleans_up_private_data_dir_on_exception(
+        self, tmp_path: Path
+    ) -> None:
+        captured: dict[str, Any] = {}
+
+        def fake_run(**kwargs: Any) -> Any:
+            captured["private_data_dir"] = kwargs["private_data_dir"]
+            raise RuntimeError("boom")
+
+        with patch("rocannon.executor.ansible_runner.run", side_effect=fake_run):
+            result = run_module(
+                module="ansible.builtin.ping",
+                module_args={},
+                inventory=[str(tmp_path)],
+                host_pattern="localhost",
+                execution_environment="some-ee:latest",
+            )
+        assert result["status"] == "error"
+        assert not Path(captured["private_data_dir"]).exists()
+
 
 class TestRunModuleCheckDiff:
     """check/diff become play-level keywords and mark the result."""

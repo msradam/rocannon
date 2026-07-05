@@ -13,7 +13,16 @@ which exposes them as MCP tools over stdio or HTTP.
 
 | Source | What rocannon reads | Tool name shape |
 |---|---|---|
-| Ansible | `ansible-doc -j <module>` | `ansible.builtin.copy`, `community.general.docker_container`, `ibm.ibm_zos_core.zos_data_set` |
+| Ansible | `ansible-doc -j <module>` | `ansible_builtin_copy`, `community_general_docker_container`, `ibm_ibm_zos_core_zos_data_set` |
+
+The tool name is the module's FQCN with dots swapped for underscores
+(`_mcp_tool_name` in `ansible.py`): MCP itself allows dots, but OpenAI-style
+function-calling schemas require `^[a-zA-Z0-9_-]+$`, so a client that forwards
+tool names straight through to an OpenAI-compatible API (most non-Claude
+clients; Claude Code's own MCP bridge silently renames dots to underscores,
+which is why this went unnoticed for a while) gets a 400 on a dotted name. The
+original FQCN is never lost, it's prepended to the tool's description and
+carried through history/audit/playbook recording (see Save/replay below).
 
 That's it. No bundled LLM, no opinionated provider matrix, no inventory
 manager, no policy engine, no plugin abstraction for other tools. Rocannon's
@@ -25,7 +34,7 @@ can call."
 Concrete example: the user types in their MCP client
 
 ```
-ansible.builtin.command(target="webhosts", cmd="systemctl restart nginx")
+ansible_builtin_command(target="webhosts", cmd="systemctl restart nginx")
 ```
 
 What actually runs:
@@ -57,7 +66,9 @@ What actually runs:
 ┌─────────────────┐
 │ ansible-runner  │  Spawns ansible-playbook against the inventory,
 │ (Python API)    │  parses the JSON event stream, returns a structured
-│                 │  result dict.
+│                 │  result dict. If the profile sets `execution_environment`,
+│                 │  this spawn happens inside that container image instead
+│                 │  of the local process (see Execution environments below).
 └─────────────────┘
 ```
 
@@ -82,7 +93,8 @@ The pieces, in order:
    Python API to invoke `ansible-playbook` as a subprocess. It synthesises
    a one-task playbook from the module name and args, runs it against the
    target host or group, parses the JSON event stream, and returns a
-   structured dict.
+   structured dict. Same for roles, via `ansible_runner.run(role=...)`
+   locally, or a manually-built playbook when containerized (see below).
 6. The result bubbles back up through the middleware (audit record gets the
    latency + status + any redacted error), FastMCP serialises it to MCP's
    tool-result format, and the client gets structured JSON.
@@ -100,8 +112,10 @@ For each module, `register_ansible_modules` runs `ansible-doc -j <module>` as
 a subprocess and parses the JSON. The parser pulls out parameter names,
 types, required flags, choices, and descriptions.
 
-**What it exposes.** One tool per module. Tool name is the module's FQCN.
-Tool parameters mirror the module's documented parameters, with one addition:
+**What it exposes.** One tool per module. Tool name is the module's FQCN with
+dots replaced by underscores (`_mcp_tool_name`); the FQCN itself is prepended
+to the tool's description. Tool parameters mirror the module's documented
+parameters, with one addition:
 a `target` parameter (the inventory host or group pattern). The tool is tagged
 with its collection and namespace, and its MCP `meta` carries the descriptive
 fields ansible-doc already provides (requirements, return keys, seealso,
@@ -133,6 +147,63 @@ argument_specs document expose no typed interface and are skipped.
 `rocannon://runs` and `rocannon://runs/{request_id}` resources live in
 `server.py`.
 
+## Execution environments
+
+A profile's `execution_environment` field dispatches both discovery and
+execution into a container image (built with `ansible-builder` or a plain
+Dockerfile) instead of rocannon's own process, via `ansible-runner`'s native
+`process_isolation`/`container_image` support (the same mechanism AWX and
+`ansible-navigator` use). This is a different pattern from
+`examples/execution-environment/`, which bakes rocannon *into* the image and
+runs the whole server there; `execution_environment` is the opposite shape,
+rocannon stays on a control host and dispatches per-call into a plain image
+(ansible-core + collections, no rocannon inside it).
+
+**Why both discovery and execution matter.** Rocannon's whole architecture is
+`ansible-doc`-driven reflection: if only *execution* were containerized,
+startup would still shell out to a local `ansible-doc`, which can't see
+collections that only live in the image. `schema.py`'s `expand_modules`,
+`fetch_module_schema(s)`, and `fetch_role_schemas` all take the same
+`execution_environment`/`execution_environment_engine`/
+`execution_environment_container_options` triplet as `executor.py`'s
+`run_module`/`run_role`, via `ansible_runner.get_plugin_list`/`get_plugin_docs`
+(the doc-side sibling of `ansible_runner.run`, not a hand-rolled
+`docker run ansible-doc` shell-out). Each profile is introspected through its
+own image; profiles with no `execution_environment` (or a different one) stay
+on the local `ansible-doc`.
+
+**Roles are asymmetric.** A collection-qualified role (FQCN, no `roles_path`)
+is expected to already live in the image, same as a module: both discovery and
+execution route through the container. A standalone (`roles_path`) role is
+host-local (introspected locally, since the container was never given that
+directory) but still *executes* containerized: `run_role` stages the role
+tree into `private_data_dir/project/roles` (ansible-playbook's actual default
+role search path; `private_data_dir/roles`, what ansible-runner's own `role=`
+convenience kwarg would set via `ANSIBLE_ROLES_PATH`, is not searched once
+that shim is bypassed) and builds the wrapping play itself rather than using
+`role=`, because that shim hands back a host-absolute playbook path that the
+container can't see.
+
+**The container never gets the client's stdio.** `ansible-runner` spawns its
+subprocess with `stdin=None` (inherit), so it would otherwise inherit
+rocannon's real fd 0. Under the stdio MCP transport, that fd *is* the pipe
+carrying JSON-RPC requests. A `docker run --interactive` container attached to
+it drains bytes meant for the protocol. A local `ansible-doc` call returns in
+under a second, so this almost never bites; a containerized call can run for
+tens of seconds, which reliably does. `cli.py`'s
+`_isolate_real_stdin_for_stdio_transport` runs once at server startup (stdio
+transport only): it duplicates the real stdin onto a private descriptor for
+FastMCP's stdio transport to read instead (`mcp.server.stdio.stdio_server()`
+binds to `sys.stdin.buffer` when it starts, not a fixed fd number, so
+reassigning `sys.stdin` is enough), then permanently points fd 0 at
+`/dev/null` so every subprocess spawned from then on inherits a harmless empty
+stream.
+
+**Preflight.** `rocannon doctor --profile <p>` checks the configured
+`execution_environment_engine` binary (`podman`/`docker`) is on `PATH` when
+`execution_environment` is set, so a misconfigured engine fails fast and
+legibly instead of surfacing as an opaque `ansible-runner` exception mid-call.
+
 ## ansible-doc to MCP field mapping
 
 Every label on a tool is a deterministic translation of an `ansible-doc` field.
@@ -158,7 +229,7 @@ surveyed with zero fetch failures. Counts in parentheses are how many of the
 
 | ansible-doc field | FastMCP target | rule | status |
 |---|---|---|---|
-| `module` (FQCN) | `name` | as-is | wired |
+| `module` (FQCN) | `name` | dots replaced with underscores (OpenAI-compatible tool names); FQCN prepended to `description` instead | wired |
 | `short_description` | `description` | flattened to one line | wired |
 | `description` (long) | `description` / `meta` | not carried; could append | available |
 | `collection` + FQCN namespace | `tags` | `ansible.builtin`, `ansible` | wired |
@@ -294,6 +365,19 @@ Two server-level tools handle this:
   session's successful tool calls (from the history buffer in
   `src/rocannon/history.py`) into a playbook.
 
+A playbook step's `tool` field is always the Ansible FQCN (`ansible.builtin.command`),
+never the callable MCP tool name (`ansible_builtin_command`): it's the literal
+task key in the rendered YAML, so it has to be a real module reference.
+`commit_session` builds steps from `RunHistory`, which only sees the live
+protocol-level tool name the client actually called (already underscored). The
+Ansible tool function stashes its true FQCN in per-call metadata
+(`meta["fqcn"]`, set in `ansible.py`); `server.py`'s audit middleware prefers
+that over the raw protocol name for the audit log, `HistoryEntry.tool`, and
+the OTel span attribute, falling back to the protocol name for meta-tools
+(`save_playbook`, `commit_session`, ...) that never set it. Manually authoring
+`save_playbook`'s `steps` still requires the FQCN directly, since there's no
+history entry to recover it from; the tool's own description says so.
+
 On the next server start, every saved playbook is parsed back through
 `rocannon.playbook` (one Rocannon step per Ansible task) and registered as
 an MCP prompt named `playbook_<name>`. Hand-edited Ansible playbooks load
@@ -382,8 +466,10 @@ src/rocannon/
 ├── server.py           create_server(). Wires FastMCP middleware, calls
 │                       register_ansible_modules, registers save_playbook +
 │                       commit_session + rocannon_{list,current,use}_profile.
-├── schema.py           ansible-doc parsing, module spec expansion.
-├── executor.py         ansible-runner Python-API wrapper.
+├── schema.py           ansible-doc parsing, module spec expansion; EE-aware
+│                       via ansible_runner.get_plugin_list/get_plugin_docs.
+├── executor.py         ansible-runner Python-API wrapper; dispatches into
+│                       execution_environment when a profile sets one.
 ├── playbook.py         Saves sessions as Ansible playbooks; parses them back.
 ├── repl.py             Operator REPL + optional .ai mode (LiteLLM).
 ├── inventory.py        ansible-inventory subprocess wrapper.
@@ -447,6 +533,32 @@ Things that surprised the author while building this:
 - **mcphost ignores the `env` field in mcp.json.** Workaround:
   `command: "env"` + `args: ["VAR=value", "rocannon", ...]`. Other clients
   (Claude Code, Cursor, Bob) honour `env` correctly.
+- **ansible-runner's subprocess inherits real stdin by default**, which is
+  invisible until you containerize (see Execution environments above). A
+  local `ansible-doc`/`ansible-playbook` call returns fast enough that the
+  race never surfaces; a containerized one runs long enough to reliably drain
+  bytes meant for the stdio MCP client's own JSON-RPC handshake, hanging the
+  first request forever with no error. This is not new to containerization,
+  it was always latent; EE just widened the window from imperceptible to
+  fatal. Fixed once, at startup, not per call: see
+  `_isolate_real_stdin_for_stdio_transport`.
+- **Colima (the default Docker context on macOS without Docker Desktop) only
+  shares specific host paths into its VM.** Paths under the user's home
+  directory work; `/tmp`, `/private/tmp`, and the default `TMPDIR`
+  (`/var/folders/...`) do not, a bind mount there is silently *empty* inside
+  the container. `ansible-runner`'s `private_data_dir` (built via
+  `tempfile.mkdtemp()`, honoring `TMPDIR`) has to land under a shared path or
+  a containerized run fails with something like "the playbook could not be
+  found" despite the file genuinely existing on the host. Set `TMPDIR` to a
+  Colima-shared directory before running rocannon under Colima.
+- **The MCP stdio client spec only forwards a small env var allowlist to the
+  spawned server process** (`HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM`,
+  `USER` on non-Windows; see `mcp.client.stdio.DEFAULT_INHERITED_ENV_VARS`),
+  not the launching process's full environment. A client spawning
+  `rocannon mcp serve` as a subprocess (Pydantic AI's MCP toolset, or any
+  `mcp`-SDK-based stdio client) needs to pass `TMPDIR` (see above) and any
+  other rocannon-relevant env vars explicitly via that transport's `env=`
+  parameter; it will not simply inherit them.
 
 ## Where to start when debugging
 
@@ -466,3 +578,8 @@ In rough order of probability:
    conftest auto-skips when prereqs are missing; an actual failure means
    something inside the registration or execution path is wrong, not the
    test harness.
+6. **`execution_environment` profile registers zero tools, or a containerized
+   call fails oddly.** `rocannon doctor --profile <p>` checks the engine
+   binary is on `PATH`; a container-mount issue (Colima path sharing) usually
+   shows up as "playbook could not be found" despite the file existing on the
+   host, see Known sharp edges.

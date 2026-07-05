@@ -1,0 +1,41 @@
+version: 3
+
+# A plain Ansible Execution Environment: ansible-core + collections, nothing
+# Rocannon-specific. Rocannon itself runs on the control host (this repo) and
+# dispatches into this image per call, via `execution_environment:` in
+# profile.yml. Contrast with ../execution-environment/, which bakes Rocannon
+# INTO the image and runs the whole MCP server there; this is the opposite
+# shape, the same one AWX and ansible-navigator use.
+#
+# Build:  ansible-builder build -t rocannon-plain-ee:demo -f execution-environment.yml
+#
+# Base note: same Python >= 3.12 requirement and prepend_* symlink steps as
+# the sibling example, for the same reason (ansible-core 2.21 needs Python
+# 3.12+; the official python image keeps python3 at /usr/local/bin, not
+# /usr/bin/python3 where ansible-builder expects it).
+
+images:
+  base_image:
+    name: docker.io/library/python:3.12-slim
+
+options:
+  package_manager_path: /usr/bin/apt-get
+
+additional_build_steps:
+  prepend_base:
+    - RUN ln -sf /usr/local/bin/python3 /usr/bin/python3
+    - RUN /usr/bin/python3 -m pip install --no-cache-dir ansible-core ansible-runner
+  prepend_galaxy:
+    - RUN ln -sf /usr/local/bin/python3 /usr/bin/python3
+  prepend_builder:
+    - RUN ln -sf /usr/local/bin/python3 /usr/bin/python3
+  prepend_final:
+    - RUN ln -sf /usr/local/bin/python3 /usr/bin/python3
+
+dependencies:
+  galaxy:
+    collections:
+      - name: ansible.posix
+  python:
+    - ansible-core
+    - ansible-runner

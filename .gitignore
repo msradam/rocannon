@@ -17,7 +17,7 @@ dev/inventories/ibmcloud_info.yml
 .rocannon/
 examples/*/tf-work/
 examples/*/.rocannon/
-examples/execution-environment/context/
+examples/*/context/
 
 .coverage
 .pytest_cache/

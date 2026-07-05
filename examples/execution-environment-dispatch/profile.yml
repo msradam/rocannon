@@ -1,0 +1,17 @@
+# Dispatches into a plain EE image instead of running locally. Build the
+# image first (see README.md), then:
+#
+#   rocannon doctor     --profile examples/execution-environment-dispatch/profile.yml
+#   rocannon mcp doctor --profile examples/execution-environment-dispatch/profile.yml
+#   rocannon mcp serve  --profile examples/execution-environment-dispatch/profile.yml
+
+inventories:
+  - ./hosts
+
+modules:
+  - ansible.builtin.ping
+  - ansible.builtin.setup
+  - ansible.posix
+
+execution_environment: rocannon-plain-ee:demo
+execution_environment_engine: docker  # podman also works; it's ansible-runner's own default

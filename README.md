@@ -17,6 +17,9 @@ startup it reads `ansible-doc` and exposes every module you have installed (plus
 any role with an argument spec) as a typed tool, so an MCP client like Claude
 Code, Cursor, or your own agent can drive your real environment in plain English.
 The tool surface is whatever you have installed, one collection or a hundred.
+Each tool's name is its Ansible FQCN with dots swapped for underscores (e.g.
+`ansible.builtin.copy` becomes `ansible_builtin_copy`), the form OpenAI-style
+function calling requires; the original FQCN stays in the tool's description.
 
 ![demo](https://raw.githubusercontent.com/msradam/rocannon/main/docs/assets/demo-agent.gif)
 
@@ -89,6 +92,9 @@ rocannon repl       --profile .rocannon/quickstart.yml   # operator shell
   two-node Arista cEOS fabric, where the `arista.eos` modules become tools.
 - [`examples/execution-environment`](examples/execution-environment/): Rocannon
   baked into an Ansible Execution Environment for a frozen, reproducible tool set.
+- [`examples/execution-environment-dispatch`](examples/execution-environment-dispatch/):
+  the opposite shape, Rocannon stays on the control host and dispatches each
+  module call into a plain EE image instead.
 
 ## Profiles
 
@@ -113,17 +119,33 @@ roles_path: ./roles         # optional, for standalone (non-collection) roles
   directory name together with `roles_path` (which resolves against the profile's
   own directory). Roles without an argument spec are skipped.
 - Optional keys: `ansible_cfg`, `vault_password_file`, `extra_envvars`.
-- **`execution_environment`** dispatches module execution into a container image
-  (built with `ansible-builder`) instead of Rocannon's own process, via
-  `ansible-runner`'s native `process_isolation`/`container_image` support.
-  `execution_environment_engine` picks the container engine (`podman`,
-  default, or `docker`), and `execution_environment_container_options` passes
-  extra args straight to it (for example `["--network", "my-compose-net"]` so
-  the container can reach other services by name). Collection Python
-  dependencies (`psycopg2` for `community.postgresql`, the `docker` SDK for
-  `community.docker`, and so on) then live in the image, baked in by
-  `ansible-builder` from each collection's own declared requirements, not in
-  Rocannon's control-side environment.
+- **`execution_environment`** dispatches module and role execution into a
+  container image (built with `ansible-builder`, or a plain Dockerfile) instead
+  of Rocannon's own process, via `ansible-runner`'s native
+  `process_isolation`/`container_image` support, the same mechanism AWX and
+  `ansible-navigator` use. `execution_environment_engine` picks the container
+  engine (`podman`, default, or `docker`), and
+  `execution_environment_container_options` passes extra args straight to it
+  (for example `["--network", "my-compose-net"]` so the container can reach
+  other services by name). Collection Python dependencies (`psycopg2` for
+  `community.postgresql`, the `docker` SDK for `community.docker`, and so on)
+  then live in the image, baked in from each collection's own declared
+  requirements, not in Rocannon's control-side environment.
+  See [`examples/execution-environment-dispatch`](examples/execution-environment-dispatch/)
+  for a working image + profile.
+  - **Discovery matches execution.** At startup, Rocannon reflects each
+    profile's modules and collection roles by running `ansible-doc` inside
+    that same image (`ansible_runner.get_plugin_list`/`get_plugin_docs`, the
+    doc-side sibling of the execution dispatch), so the tool surface it
+    registers is exactly what the image can run, not whatever (if anything)
+    happens to be installed locally.
+  - **Roles are asymmetric.** A collection role (FQCN) is expected to already
+    live in the image, same as a module. A standalone `roles_path` role is
+    host-local: introspected locally (that directory is never visible inside
+    the container), but still staged into the container and executed there.
+  - `rocannon doctor` checks the configured engine binary is on `PATH` when
+    `execution_environment` is set, so a typo'd engine fails fast instead of
+    surfacing as an opaque error mid-call.
 
 Drop multiple profiles in `.rocannon/profiles/` (with a `default.yml`) and switch
 at runtime via the `rocannon_list_profiles`, `rocannon_current_profile`, and

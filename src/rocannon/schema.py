@@ -1,8 +1,8 @@
 import json
 import logging
-import os
-import subprocess
 from typing import Any
+
+import ansible_runner
 
 logger = logging.getLogger("rocannon.schema")
 
@@ -31,7 +31,35 @@ ANSIBLE_TYPE_MAP: dict[str, type] = {
 }
 
 
-def expand_modules(specs: list[str]) -> list[str]:
+def _ee_kwargs(
+    execution_environment: str | None,
+    execution_environment_engine: str,
+    execution_environment_container_options: list[str] | None,
+) -> dict[str, Any]:
+    """Build the process_isolation kwargs shared by every ``ansible_runner`` doc call.
+
+    Mirrors ``executor.py``'s dispatch: when ``execution_environment`` is set, the
+    ``ansible-doc`` invocation itself runs inside that image via ansible-runner's
+    own container support, so discovery reflects the same collection set that
+    execution runs against instead of whatever (if anything) is installed on
+    Rocannon's own control-side environment.
+    """
+    if not execution_environment:
+        return {}
+    return {
+        "process_isolation": True,
+        "process_isolation_executable": execution_environment_engine,
+        "container_image": execution_environment,
+        "container_options": execution_environment_container_options or None,
+    }
+
+
+def expand_modules(
+    specs: list[str],
+    execution_environment: str | None = None,
+    execution_environment_engine: str = "podman",
+    execution_environment_container_options: list[str] | None = None,
+) -> list[str]:
     """Expand module/collection/namespace specs into fully-qualified module names."""
     explicit: list[str] = []
     prefixes: list[str] = []
@@ -45,16 +73,24 @@ def expand_modules(specs: list[str]) -> list[str]:
     if not prefixes:
         return explicit
 
+    ee_kwargs = _ee_kwargs(
+        execution_environment, execution_environment_engine, execution_environment_container_options
+    )
     try:
-        result = subprocess.run(
-            ["ansible-doc", "--list", "--type", "module", "-j"],
-            capture_output=True,
-            text=True,
-            check=True,
+        all_modules, error = ansible_runner.get_plugin_list(
+            response_format="json", plugin_type="module", quiet=True, **ee_kwargs
         )
-        all_modules = json.loads(result.stdout)
-    except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
-        logger.error("ansible-doc --list failed: %s, returning explicit modules only", exc)
+    except json.JSONDecodeError as exc:
+        logger.error(
+            "ansible-doc --list returned unparsable JSON: %s, returning explicit modules only", exc
+        )
+        return explicit
+
+    if not isinstance(all_modules, dict):
+        logger.error(
+            "ansible-doc --list failed: %s, returning explicit modules only",
+            (error or "no output").strip(),
+        )
         return explicit
 
     expanded: list[str] = explicit.copy()
@@ -65,31 +101,32 @@ def expand_modules(specs: list[str]) -> list[str]:
     return sorted(set(expanded))
 
 
-def fetch_module_schema(module_name: str) -> dict[str, Any]:
+def fetch_module_schema(
+    module_name: str,
+    execution_environment: str | None = None,
+    execution_environment_engine: str = "podman",
+    execution_environment_container_options: list[str] | None = None,
+) -> dict[str, Any]:
     """Fetch and parse ansible-doc JSON for a single module."""
     from rocannon.executor import ensure_ansible_on_path
 
     ensure_ansible_on_path()
-    result = subprocess.run(
-        ["ansible-doc", "-t", "module", "-j", module_name],
-        capture_output=True,
-        text=True,
+    ee_kwargs = _ee_kwargs(
+        execution_environment, execution_environment_engine, execution_environment_container_options
     )
-
-    if result.returncode != 0:
-        raise SchemaFetchError(
-            f"ansible-doc failed for {module_name}: {result.stderr.strip() or 'no stderr'}"
-        )
-
-    if not result.stdout.strip():
-        raise SchemaFetchError(f"ansible-doc returned empty output for {module_name}")
-
     try:
-        doc = json.loads(result.stdout)
+        doc, error = ansible_runner.get_plugin_docs(
+            [module_name], plugin_type="module", response_format="json", quiet=True, **ee_kwargs
+        )
     except json.JSONDecodeError as exc:
         raise SchemaFetchError(
             f"Failed to parse ansible-doc JSON for {module_name}: {exc}"
         ) from exc
+
+    if not isinstance(doc, dict) or not doc:
+        raise SchemaFetchError(
+            f"ansible-doc failed for {module_name}: {(error or 'no output').strip() or 'no stderr'}"
+        )
 
     if module_name not in doc:
         raise SchemaFetchError(f"Module {module_name} not present in ansible-doc output")
@@ -104,15 +141,31 @@ def fetch_module_schema(module_name: str) -> dict[str, Any]:
 _DOC_BATCH_SIZE = 256
 
 
-def _fetch_individually(names: list[str], into: dict[str, dict[str, Any]]) -> None:
+def _fetch_individually(
+    names: list[str],
+    into: dict[str, dict[str, Any]],
+    execution_environment: str | None,
+    execution_environment_engine: str,
+    execution_environment_container_options: list[str] | None,
+) -> None:
     for name in names:
         try:
-            into[name] = fetch_module_schema(name)
+            into[name] = fetch_module_schema(
+                name,
+                execution_environment=execution_environment,
+                execution_environment_engine=execution_environment_engine,
+                execution_environment_container_options=execution_environment_container_options,
+            )
         except SchemaFetchError as exc:
             logger.warning("Skipping %s: %s", name, exc)
 
 
-def fetch_module_schemas(module_names: list[str]) -> dict[str, dict[str, Any]]:
+def fetch_module_schemas(
+    module_names: list[str],
+    execution_environment: str | None = None,
+    execution_environment_engine: str = "podman",
+    execution_environment_container_options: list[str] | None = None,
+) -> dict[str, dict[str, Any]]:
     """Fetch and parse ansible-doc JSON for many modules in one pass per chunk.
 
     Returns a mapping of module name to parsed schema. Names absent from
@@ -128,23 +181,39 @@ def fetch_module_schemas(module_names: list[str]) -> dict[str, dict[str, Any]]:
     from rocannon.executor import ensure_ansible_on_path
 
     ensure_ansible_on_path()
+    ee_kwargs = _ee_kwargs(
+        execution_environment, execution_environment_engine, execution_environment_container_options
+    )
     schemas: dict[str, dict[str, Any]] = {}
     for i in range(0, len(names), _DOC_BATCH_SIZE):
         chunk = names[i : i + _DOC_BATCH_SIZE]
-        result = subprocess.run(
-            ["ansible-doc", "-t", "module", "-j", *chunk],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0 or not result.stdout.strip():
-            logger.warning("Batched ansible-doc failed for %d modules; retrying singly", len(chunk))
-            _fetch_individually(chunk, schemas)
-            continue
         try:
-            doc = json.loads(result.stdout)
+            doc, error = ansible_runner.get_plugin_docs(
+                chunk, plugin_type="module", response_format="json", quiet=True, **ee_kwargs
+            )
         except json.JSONDecodeError:
             logger.warning("Unparsable batched ansible-doc output; retrying %d singly", len(chunk))
-            _fetch_individually(chunk, schemas)
+            _fetch_individually(
+                chunk,
+                schemas,
+                execution_environment,
+                execution_environment_engine,
+                execution_environment_container_options,
+            )
+            continue
+        if not isinstance(doc, dict) or not doc:
+            logger.warning(
+                "Batched ansible-doc failed for %d modules (%s); retrying singly",
+                len(chunk),
+                (error or "no output").strip(),
+            )
+            _fetch_individually(
+                chunk,
+                schemas,
+                execution_environment,
+                execution_environment_engine,
+                execution_environment_container_options,
+            )
             continue
         for name in chunk:
             entry = doc.get(name)
@@ -176,7 +245,11 @@ def _parse_module_doc(module_name: str, module_doc: dict[str, Any]) -> dict[str,
 
 
 def fetch_role_schemas(
-    role_names: list[str], roles_path: str | None = None
+    role_names: list[str],
+    roles_path: str | None = None,
+    execution_environment: str | None = None,
+    execution_environment_engine: str = "podman",
+    execution_environment_container_options: list[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Fetch and parse ansible-doc JSON for roles, like modules but ``-t role``.
 
@@ -184,6 +257,12 @@ def fetch_role_schemas(
     module is: ``entry_points.<name>.options`` mirrors ``doc.options``. Only the
     ``main`` entry point is mapped. Roles without a documented argspec produce no
     schema and are skipped; the caller reports the gap.
+
+    ``execution_environment`` only applies when ``roles_path`` is unset: a
+    standalone role directory is host-local, so ansible-doc must see it
+    directly rather than through a container that was never given that path.
+    A collection-qualified role (FQCN, no ``roles_path``) is expected to
+    already live in the image, same as a module.
     """
     names = list(dict.fromkeys(role_names))
     if not names:
@@ -192,23 +271,30 @@ def fetch_role_schemas(
     from rocannon.executor import ensure_ansible_on_path
 
     ensure_ansible_on_path()
-    env = {**os.environ, "ANSIBLE_ROLES_PATH": roles_path} if roles_path else None
+    if roles_path:
+        kwargs: dict[str, Any] = {"envvars": {"ANSIBLE_ROLES_PATH": roles_path}}
+    else:
+        kwargs = _ee_kwargs(
+            execution_environment,
+            execution_environment_engine,
+            execution_environment_container_options,
+        )
     schemas: dict[str, dict[str, Any]] = {}
     for i in range(0, len(names), _DOC_BATCH_SIZE):
         chunk = names[i : i + _DOC_BATCH_SIZE]
-        result = subprocess.run(
-            ["ansible-doc", "-t", "role", "-j", *chunk],
-            capture_output=True,
-            text=True,
-            env=env,
-        )
-        if result.returncode != 0 or not result.stdout.strip():
-            logger.warning("ansible-doc -t role failed for %d role(s)", len(chunk))
-            continue
         try:
-            doc = json.loads(result.stdout)
+            doc, error = ansible_runner.get_plugin_docs(
+                chunk, plugin_type="role", response_format="json", quiet=True, **kwargs
+            )
         except json.JSONDecodeError:
             logger.warning("Unparsable ansible-doc -t role output for %d role(s)", len(chunk))
+            continue
+        if not isinstance(doc, dict) or not doc:
+            logger.warning(
+                "ansible-doc -t role failed for %d role(s): %s",
+                len(chunk),
+                (error or "no output").strip(),
+            )
             continue
         for name in chunk:
             parsed = _parse_role_doc(name, doc.get(name, {}))

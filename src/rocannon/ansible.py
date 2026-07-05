@@ -82,7 +82,14 @@ def register_ansible_modules(
         inv = load_inventory(lp.config.inventories)
         union_hosts.update(inv["hosts"])
         union_groups.update(inv["groups"])
-        expanded = set(expand_modules(lp.config.modules))
+        expanded = set(
+            expand_modules(
+                lp.config.modules,
+                execution_environment=lp.config.execution_environment,
+                execution_environment_engine=lp.config.execution_environment_engine,
+                execution_environment_container_options=lp.config.execution_environment_container_options,
+            )
+        )
         runtime.expanded_modules[name] = expanded
         runtime.expanded_roles[name] = set(lp.config.roles)
         union_modules.update(expanded)
@@ -106,7 +113,23 @@ def register_ansible_modules(
     schema_cache: dict[str, dict[str, Any]] = {}
     ordered = sorted(union_modules)
 
-    schemas = fetch_module_schemas(ordered)
+    # Fetched per profile, not as one global batch: profiles may point at
+    # different execution environments (or none), so each profile's modules
+    # must be introspected through that profile's own image. A module already
+    # resolved by an earlier profile is skipped.
+    schemas: dict[str, dict[str, Any]] = {}
+    for name, lp in registry.profiles.items():
+        missing = sorted(runtime.expanded_modules[name] - schemas.keys())
+        if not missing:
+            continue
+        schemas.update(
+            fetch_module_schemas(
+                missing,
+                execution_environment=lp.config.execution_environment,
+                execution_environment_engine=lp.config.execution_environment_engine,
+                execution_environment_container_options=lp.config.execution_environment_container_options,
+            )
+        )
     for module_name in ordered:
         schema = schemas.get(module_name)
         if schema is None:
@@ -146,7 +169,15 @@ def register_ansible_modules(
         if not lp.config.roles:
             continue
         rp = str(lp.config.roles_path) if lp.config.roles_path else None
-        role_schemas.update(fetch_role_schemas(list(lp.config.roles), roles_path=rp))
+        role_schemas.update(
+            fetch_role_schemas(
+                list(lp.config.roles),
+                roles_path=rp,
+                execution_environment=lp.config.execution_environment,
+                execution_environment_engine=lp.config.execution_environment_engine,
+                execution_environment_container_options=lp.config.execution_environment_container_options,
+            )
+        )
     union_roles = (
         sorted(set().union(*runtime.expanded_roles.values())) if runtime.expanded_roles else []
     )
@@ -407,6 +438,19 @@ def _collection_tag(module_name: str) -> str:
     return parts[0] if len(parts) > 1 else module_name
 
 
+def _mcp_tool_name(fqcn: str) -> str:
+    """Convert an Ansible FQCN into a valid MCP tool name.
+
+    MCP itself allows dots, but OpenAI-style function-calling schemas require
+    ``^[a-zA-Z0-9_-]+$``, so a client that forwards rocannon's tools straight
+    through to an OpenAI-compatible API (as most non-Claude clients do) gets a
+    400 on a dotted tool name. The FQCN itself is never lost: it still lives in
+    the tool's description and in ``schema['name']``/``schema_cache`` for every
+    other lookup rocannon does internally.
+    """
+    return fqcn.replace(".", "_")
+
+
 def _tags_for(module_name: str) -> set[str]:
     """Tag a tool by its collection and namespace, both derived from the FQCN.
 
@@ -572,8 +616,8 @@ def _register_tool(
 
     module_meta = schema.get("meta") or {}
     mcp.tool(
-        name=module_name,
-        description=schema["description"],
+        name=_mcp_tool_name(module_name),
+        description=f"[{module_name}] {schema['description']}",
         tags=_tags_for(module_name) | {_MODULE_TAG},
         annotations=annotations,
         output_schema=_RESULT_SCHEMA,
@@ -698,6 +742,7 @@ def _make_tool_fn(
         meta = get_call_metadata()
         if meta is not None:
             meta["args"] = redact(module_args | {"target": target})
+            meta["fqcn"] = module_name
 
         if not runtime.is_module_active(module_name):
             err = {
@@ -732,7 +777,7 @@ def _make_tool_fn(
 
     tool_fn.__annotations__ = annotations
     tool_fn.__signature__ = inspect.Signature(sig_params)  # type: ignore[attr-defined]
-    tool_fn.__name__ = module_name.replace(".", "_")
+    tool_fn.__name__ = _mcp_tool_name(module_name)
 
     return tool_fn
 
@@ -798,11 +843,12 @@ def _register_progressive_meta(
                 "error": f"{module!r} is not in this server's catalog",
                 "hint": "find modules with ansible_search_modules",
             }
-        await ctx.enable_components(names={module}, components={"tool"})
+        tool_name = _mcp_tool_name(module)
+        await ctx.enable_components(names={tool_name}, components={"tool"})
         return {
             "ok": True,
-            "tool": module,
-            "note": f"{module} is now callable as a typed tool in this session.",
+            "tool": tool_name,
+            "note": f"{tool_name} ({module}) is now callable as a typed tool in this session.",
         }
 
     return ["ansible_search_modules", "ansible_use_module"]
@@ -819,8 +865,8 @@ def _register_role_tool(
     fn = _make_role_tool_fn(role_name, schema, inv, runtime)
     role_meta = schema.get("meta") or {}
     mcp.tool(
-        name=role_name,
-        description=schema["description"],
+        name=_mcp_tool_name(role_name),
+        description=f"[{role_name}] {schema['description']}",
         tags=_tags_for(role_name) | {"role"},
         output_schema=_RESULT_SCHEMA,
         meta={"ansible": role_meta} if role_meta else None,
@@ -881,6 +927,7 @@ def _make_role_tool_fn(
         meta = get_call_metadata()
         if meta is not None:
             meta["args"] = redact(role_args | {"target": target})
+            meta["fqcn"] = role_name
 
         if not runtime.is_role_active(role_name):
             err = {
@@ -934,6 +981,9 @@ def _make_role_tool_fn(
             roles_path=roles_path,
             timeout=cfg.timeouts.get(role_name),
             envvars=envvars,
+            execution_environment=cfg.execution_environment,
+            execution_environment_engine=cfg.execution_environment_engine,
+            execution_environment_container_options=cfg.execution_environment_container_options,
         )
         if meta is not None:
             meta["result"] = result
@@ -942,6 +992,6 @@ def _make_role_tool_fn(
 
     tool_fn.__annotations__ = annotations
     tool_fn.__signature__ = inspect.Signature(sig_params)  # type: ignore[attr-defined]
-    tool_fn.__name__ = role_name.replace(".", "_")
+    tool_fn.__name__ = _mcp_tool_name(role_name)
 
     return tool_fn

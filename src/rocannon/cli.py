@@ -216,6 +216,37 @@ def _pkg_version(name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _isolate_real_stdin_for_stdio_transport() -> None:
+    """Sever the real stdin from OS-level fd 0 before anything can inherit it.
+
+    ansible-runner spawns ansible-doc/ansible-playbook (and, once containerized,
+    the podman/docker CLI itself) with stdin left to inherit the parent's real
+    fd 0. Under the stdio MCP transport, fd 0 *is* the pipe carrying JSON-RPC
+    requests from the client; a `docker run --interactive` container attached
+    to that fd continuously drains it for its own (unused) stdin, racing
+    FastMCP's own reader for the same bytes. A local ansible-doc call returns
+    in well under a second, so this race rarely matters in practice; a
+    containerized call can run for tens of seconds, which reliably loses real
+    protocol bytes. On server startup this can drain the client's own initial
+    handshake before anyone answers it, hanging the first request forever with
+    no error at all.
+
+    ansible-runner exposes no way to override the child's stdin, so the
+    isolation has to happen on rocannon's side, once, before anything spawns:
+    duplicate the real fd 0 onto a private descriptor for FastMCP's stdio
+    transport to read instead (``mcp.server.stdio.stdio_server()`` reads via
+    ``sys.stdin.buffer``, evaluated when it starts, not a fixed fd number, so
+    reassigning ``sys.stdin`` here is enough), then permanently point the
+    process's real fd 0 at ``/dev/null`` so every subprocess spawned from here
+    on inherits a harmless empty stream instead of the live pipe.
+    """
+    private_stdin_fd = os.dup(0)
+    devnull_fd = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(devnull_fd, 0)
+    os.close(devnull_fd)
+    sys.stdin = os.fdopen(private_stdin_fd, "r")
+
+
 def _start_server(
     inventories: list[Path] | None,
     modules: list[str] | None,
@@ -224,6 +255,8 @@ def _start_server(
     log_level: LogLevel,
 ) -> None:
     _setup_logging(log_level)
+    if transport is Transport.stdio:
+        _isolate_real_stdin_for_stdio_transport()
     registry, active = _resolve_profile_source(
         list(inventories or []), list(modules or []), profile, transport.value
     )
@@ -519,6 +552,16 @@ def _doctor_profile(
     return [], None, list(inventories) if inventories else []
 
 
+def _doctor_execution_environment(cfg: Config | None) -> list[_DoctorRow]:
+    """If the profile dispatches into a container image, check the engine binary
+    is on PATH. A missing podman/docker fails at run time with an opaque
+    ansible-runner exception; catch it here instead."""
+    if cfg is None or not cfg.execution_environment:
+        return []
+    sev, msg = _binary_check(cfg.execution_environment_engine)
+    return [(sev, "ExecutionEnv", f"image={cfg.execution_environment} {msg}")]
+
+
 def _doctor_ansible_env(cfg: Config | None) -> list[_DoctorRow]:
     """What env will reach the ansible-runner subprocess."""
     rows: list[_DoctorRow] = []
@@ -586,6 +629,7 @@ def doctor(
     profile_rows, cfg, inv_paths = _doctor_profile(profile, inventories)
     rows += profile_rows
     rows += _doctor_ansible_env(cfg)
+    rows += _doctor_execution_environment(cfg)
     for inv in inv_paths:
         sev, msg = _inventory_check(inv)
         rows.append((sev, "Inventory", msg))
@@ -1154,13 +1198,19 @@ def _build_module_parser(
     return parser, name_map
 
 
-def _resolve_inventory_paths(inventory_flag: list[str], profile_flag: str | None) -> list[str]:
+def _resolve_inventory_paths(
+    inventory_flag: list[str], profile_flag: str | None
+) -> tuple[list[str], Config | None]:
     """Resolve inventory paths from ``--inventory`` / ``--profile`` / discovery.
+
+    Also returns the loaded profile ``Config``, so callers can honor its
+    ``execution_environment`` too; ``None`` when resolved from a bare
+    ``--inventory`` flag with no profile to load.
 
     Exits with status 2 and an error message on stderr when nothing resolves.
     """
     if inventory_flag:
-        return [str(Path(p).resolve()) for p in inventory_flag]
+        return [str(Path(p).resolve()) for p in inventory_flag], None
     try:
         cfg = _build_config([], [], profile_flag, "stdio")
     except typer.BadParameter as exc:
@@ -1173,7 +1223,7 @@ def _resolve_inventory_paths(inventory_flag: list[str], profile_flag: str | None
             "or run from a directory with .rocannon/profiles/default.yml.\n"
         )
         sys.exit(2)
-    return inv_paths
+    return inv_paths, cfg
 
 
 def _dispatch_module(fqcn: str, argv: list[str]) -> None:
@@ -1199,7 +1249,7 @@ def _dispatch_module(fqcn: str, argv: list[str]) -> None:
         if value is not None:
             module_args[ansible_name] = value
 
-    inv_paths = _resolve_inventory_paths(ns.inventory, ns.profile)
+    inv_paths, cfg = _resolve_inventory_paths(ns.inventory, ns.profile)
 
     result = run_module(
         module=fqcn,
@@ -1209,6 +1259,11 @@ def _dispatch_module(fqcn: str, argv: list[str]) -> None:
         timeout=ns.timeout,
         check=getattr(ns, "check", False),
         diff=getattr(ns, "diff", False),
+        execution_environment=cfg.execution_environment if cfg else None,
+        execution_environment_engine=cfg.execution_environment_engine if cfg else "podman",
+        execution_environment_container_options=(
+            cfg.execution_environment_container_options if cfg else None
+        ),
     )
 
     if ns.record:

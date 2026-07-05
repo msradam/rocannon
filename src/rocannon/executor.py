@@ -87,6 +87,23 @@ def build_envvars(
     return env
 
 
+def _stage_ee_inventory(private_data_dir: str, abs_inventory: list[str]) -> None:
+    """Copy every inventory source into private_data_dir/inventory.
+
+    Shared by run_module and run_role: once containerized, ansible-runner only
+    ever looks at private_data_dir/inventory (see run_module's docstring), so
+    both entry points need the same staging step.
+    """
+    inventory_dir = os.path.join(private_data_dir, "inventory")
+    os.makedirs(inventory_dir, exist_ok=True)
+    for src in abs_inventory:
+        dest = os.path.join(inventory_dir, os.path.basename(src))
+        if os.path.isdir(src):
+            shutil.copytree(src, dest, dirs_exist_ok=True)
+        else:
+            shutil.copy2(src, dest)
+
+
 def run_module(
     module: str,
     module_args: dict[str, Any],
@@ -156,20 +173,12 @@ def run_module(
         # (and, under a VM-backed engine like Colima, may not even be on a
         # host path the VM shares).
         private_data_dir = tempfile.mkdtemp(prefix="rocannon_ee_")
+        _stage_ee_inventory(private_data_dir, abs_inventory)
         project_dir = os.path.join(private_data_dir, "project")
         os.makedirs(project_dir, exist_ok=True)
         playbook_path = os.path.join(project_dir, "playbook.yml")
         with open(playbook_path, "w") as f:
             yaml.dump([play], f)
-
-        inventory_dir = os.path.join(private_data_dir, "inventory")
-        os.makedirs(inventory_dir, exist_ok=True)
-        for src in abs_inventory:
-            dest = os.path.join(inventory_dir, os.path.basename(src))
-            if os.path.isdir(src):
-                shutil.copytree(src, dest, dirs_exist_ok=True)
-            else:
-                shutil.copy2(src, dest)
     else:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
             yaml.dump([play], f)
@@ -231,12 +240,31 @@ def run_role(
     timeout: int | None = None,
     idle_timeout: int | None = None,
     envvars: dict[str, str] | None = None,
+    execution_environment: str | None = None,
+    execution_environment_engine: str = "podman",
+    execution_environment_container_options: list[str] | None = None,
 ) -> dict[str, Any]:
     """Execute an Ansible role via ansible-runner's ``run(role=...)``.
 
     Role arguments are passed as extravars; the role's argument_specs validate
     them at runtime (a missing required arg fails the run). Returns a structured
     result with the per-host stats recap rather than a single module's output.
+
+    ``execution_environment`` mirrors ``run_module``'s container dispatch: a
+    collection-namespaced role (e.g. ``my_ns.my_coll.setup_web``) is expected to
+    already live in the image, same as a module. A standalone ``roles_path``
+    role is host-local, so it is copied into ``private_data_dir/roles`` where
+    ansible-runner's own role lookup (``ANSIBLE_ROLES_PATH`` defaulting to
+    ``private_data_dir/roles``) finds it inside the container.
+
+    Containerized runs build the wrapping play themselves, the same way
+    ``run_module`` does, instead of using ansible-runner's ``role=`` convenience
+    kwarg: that shim (``dump_artifacts``) writes the synthetic playbook to
+    ``private_data_dir/project/main.json`` and hands back that *host* path, which
+    ansible-runner then passes straight through to the containerized
+    ``ansible-playbook`` command line unchanged (unlike the inventory path, it
+    is never rewritten to the in-container mount point), so the container looks
+    for a playbook at a path that only exists on the host and fails outright.
     """
     if timeout is None:
         timeout = resolve_timeout()
@@ -245,30 +273,68 @@ def run_role(
     abs_inventory = [
         str(p if (p := Path(inv)).is_absolute() else Path.cwd() / p) for inv in inventory
     ]
+
+    private_data_dir: str | None = None
     extra: dict[str, Any] = {}
-    if roles_path:
+    if execution_environment:
+        private_data_dir = tempfile.mkdtemp(prefix="rocannon_ee_")
+        _stage_ee_inventory(private_data_dir, abs_inventory)
+        project_dir = os.path.join(private_data_dir, "project")
+        os.makedirs(project_dir, exist_ok=True)
+        play = [{"hosts": host_pattern, "roles": [{"name": role, "vars": role_args or {}}]}]
+        with open(os.path.join(project_dir, "playbook.yml"), "w") as f:
+            yaml.dump(play, f)
+        if roles_path:
+            # ansible-playbook's default role search path is <playbook_dir>/roles
+            # (here private_data_dir/project/roles), not private_data_dir/roles:
+            # the latter is only searched via the ANSIBLE_ROLES_PATH env var that
+            # ansible-runner's role= convenience kwarg sets, which the manually
+            # built playbook above deliberately bypasses.
+            staged_roles = os.path.join(project_dir, "roles")
+            shutil.copytree(roles_path, staged_roles, dirs_exist_ok=True)
+    elif roles_path:
         extra["roles_path"] = str(roles_path)
-    try:
-        runner = ansible_runner.run(
+
+    runner_kwargs: dict[str, Any] = dict(
+        inventory=abs_inventory,
+        quiet=True,
+        timeout=timeout,
+        settings={"idle_timeout": idle_timeout},
+        envvars=envvars or {},
+        **extra,
+    )
+    if execution_environment:
+        runner_kwargs.update(
+            playbook="playbook.yml",
+            private_data_dir=private_data_dir,
+            process_isolation=True,
+            process_isolation_executable=execution_environment_engine,
+            container_image=execution_environment,
+            container_options=execution_environment_container_options or None,
+        )
+    else:
+        runner_kwargs.update(
             role=role,
             host_pattern=host_pattern,
-            inventory=abs_inventory,
             extravars=role_args or {},
-            quiet=True,
-            timeout=timeout,
-            settings={"idle_timeout": idle_timeout},
-            envvars=envvars,
-            **extra,
         )
-    except Exception as exc:
-        return {
-            "status": "error",
-            "changed": False,
-            "result": {},
-            "stdout": "",
-            "stderr": redact_text(str(exc)),
-        }
-    return _parse_role_result(runner)
+
+    try:
+        try:
+            runner = ansible_runner.run(**runner_kwargs)
+        except Exception as exc:
+            return {
+                "status": "error",
+                "changed": False,
+                "result": {},
+                "stdout": "",
+                "stderr": redact_text(str(exc)),
+            }
+        return _parse_role_result(runner)
+    finally:
+        with contextlib.suppress(Exception):
+            if private_data_dir:
+                shutil.rmtree(private_data_dir)
 
 
 def _parse_role_result(runner: Any) -> dict[str, Any]:

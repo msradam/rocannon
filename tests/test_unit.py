@@ -5,12 +5,12 @@ subprocess and ansible-runner calls. No containers, Ollama, or network required.
 """
 
 import json
-import subprocess
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 
 from rocannon.ansible import (
     _build_annotations,
@@ -35,6 +35,7 @@ from rocannon.executor import (
     resolve_idle_timeout,
     resolve_timeout,
     run_module,
+    run_role,
 )
 from rocannon.inventory import load_inventory
 from rocannon.redaction import REDACTED, redact, redact_text
@@ -284,88 +285,101 @@ class TestExpandModules:
         assert set(result) == {"ansible.builtin.ping", "ansible.builtin.copy"}
 
     def test_prefix_expanded(self) -> None:
-        completed = MagicMock()
-        completed.returncode = 0
-        completed.stdout = json.dumps(SAMPLE_MODULE_LIST)
-        with patch("rocannon.schema.subprocess.run", return_value=completed):
+        with patch(
+            "rocannon.schema.ansible_runner.get_plugin_list",
+            return_value=(SAMPLE_MODULE_LIST, ""),
+        ) as mock_list:
             result = expand_modules(["ansible.builtin"])
         assert "ansible.builtin.ping" in result
         assert "ansible.builtin.copy" in result
         assert "ibm.ibm_zos_core.zos_ping" not in result
+        # Regression: without quiet=True, ansible-runner writes ansible-doc's
+        # raw output straight to the real stdout, corrupting the stdio MCP
+        # transport every profile uses it over.
+        assert mock_list.call_args[1]["quiet"] is True
 
-    def test_subprocess_failure_returns_explicit_only(self) -> None:
+    def test_doc_failure_returns_explicit_only(self) -> None:
         with patch(
-            "rocannon.schema.subprocess.run",
-            side_effect=subprocess.CalledProcessError(1, "ansible-doc"),
+            "rocannon.schema.ansible_runner.get_plugin_list",
+            return_value=("", "ansible-doc: command not found"),
         ):
             result = expand_modules(["ansible.builtin", "ansible.builtin.ping"])
         assert result == ["ansible.builtin.ping"]
 
-    def test_no_prefixes_skips_subprocess(self) -> None:
-        with patch("rocannon.schema.subprocess.run") as mock_run:
+    def test_no_prefixes_skips_ansible_doc_call(self) -> None:
+        with patch("rocannon.schema.ansible_runner.get_plugin_list") as mock_list:
             result = expand_modules(["ansible.builtin.ping"])
-        mock_run.assert_not_called()
+        mock_list.assert_not_called()
         assert result == ["ansible.builtin.ping"]
 
     def test_deduplicates_results(self) -> None:
-        completed = MagicMock()
-        completed.returncode = 0
-        completed.stdout = json.dumps({"ansible.builtin.ping": "Ping"})
-        with patch("rocannon.schema.subprocess.run", return_value=completed):
+        with patch(
+            "rocannon.schema.ansible_runner.get_plugin_list",
+            return_value=({"ansible.builtin.ping": "Ping"}, ""),
+        ):
             result = expand_modules(["ansible.builtin", "ansible.builtin.ping"])
         assert result.count("ansible.builtin.ping") == 1
+
+    def test_execution_environment_kwargs_forwarded(self) -> None:
+        with patch(
+            "rocannon.schema.ansible_runner.get_plugin_list", return_value=({}, "")
+        ) as mock_list:
+            expand_modules(
+                ["ansible.builtin"],
+                execution_environment="some-ee:latest",
+                execution_environment_engine="docker",
+                execution_environment_container_options=["--network", "my-net"],
+            )
+        assert mock_list.call_args[1]["process_isolation"] is True
+        assert mock_list.call_args[1]["process_isolation_executable"] == "docker"
+        assert mock_list.call_args[1]["container_image"] == "some-ee:latest"
+        assert mock_list.call_args[1]["container_options"] == ["--network", "my-net"]
 
 
 class TestFetchModuleSchema:
     def test_parses_valid_doc(self) -> None:
-        completed = MagicMock()
-        completed.returncode = 0
-        completed.stdout = json.dumps(SAMPLE_ANSIBLE_DOC)
-        with patch("rocannon.schema.subprocess.run", return_value=completed):
+        with patch(
+            "rocannon.schema.ansible_runner.get_plugin_docs",
+            return_value=(SAMPLE_ANSIBLE_DOC, ""),
+        ) as mock_docs:
             schema = fetch_module_schema("ansible.builtin.ping")
         assert schema["name"] == "ansible.builtin.ping"
         assert "pong" in schema["description"].lower()
         assert len(schema["parameters"]) == 1
         assert schema["parameters"][0]["name"] == "data"
+        assert mock_docs.call_args[1]["quiet"] is True
 
-    def test_subprocess_failure_raises(self) -> None:
-        completed = MagicMock()
-        completed.returncode = 1
-        completed.stderr = "error"
-        completed.stdout = ""
+    def test_doc_failure_raises(self) -> None:
         with (
-            patch("rocannon.schema.subprocess.run", return_value=completed),
+            patch("rocannon.schema.ansible_runner.get_plugin_docs", return_value=("", "error")),
             pytest.raises(SchemaFetchError, match="ansible-doc failed"),
         ):
             fetch_module_schema("bad.module.name")
 
     def test_invalid_json_raises(self) -> None:
-        completed = MagicMock()
-        completed.returncode = 0
-        completed.stdout = "not json"
         with (
-            patch("rocannon.schema.subprocess.run", return_value=completed),
+            patch(
+                "rocannon.schema.ansible_runner.get_plugin_docs",
+                side_effect=json.JSONDecodeError("bad json", "not json", 0),
+            ),
             pytest.raises(SchemaFetchError, match="Failed to parse"),
         ):
             fetch_module_schema("ansible.builtin.ping")
 
     def test_module_not_in_doc_raises(self) -> None:
-        completed = MagicMock()
-        completed.returncode = 0
-        completed.stdout = json.dumps({"some.other.module": {}})
         with (
-            patch("rocannon.schema.subprocess.run", return_value=completed),
+            patch(
+                "rocannon.schema.ansible_runner.get_plugin_docs",
+                return_value=({"some.other.module": {}}, ""),
+            ),
             pytest.raises(SchemaFetchError, match="not present"),
         ):
             fetch_module_schema("ansible.builtin.ping")
 
-    def test_empty_stdout_raises(self) -> None:
-        completed = MagicMock()
-        completed.returncode = 0
-        completed.stdout = "   "
+    def test_empty_doc_raises(self) -> None:
         with (
-            patch("rocannon.schema.subprocess.run", return_value=completed),
-            pytest.raises(SchemaFetchError, match="empty output"),
+            patch("rocannon.schema.ansible_runner.get_plugin_docs", return_value=({}, "")),
+            pytest.raises(SchemaFetchError, match="ansible-doc failed"),
         ):
             fetch_module_schema("ansible.builtin.ping")
 
@@ -383,10 +397,7 @@ class TestFetchModuleSchema:
                 "return": {"path": {}, "changed": {}},
             }
         }
-        completed = MagicMock()
-        completed.returncode = 0
-        completed.stdout = json.dumps(doc)
-        with patch("rocannon.schema.subprocess.run", return_value=completed):
+        with patch("rocannon.schema.ansible_runner.get_plugin_docs", return_value=(doc, "")):
             meta = fetch_module_schema("x.y.z")["meta"]
         assert meta["requirements"] == ["lib >= 1.0"]
         assert meta["version_added"] == "2.5.0"
@@ -400,12 +411,26 @@ class TestFetchModuleSchema:
                 "doc": {"short_description": "Z", "options": {}, "version_added": "historical"}
             }
         }
-        completed = MagicMock()
-        completed.returncode = 0
-        completed.stdout = json.dumps(doc)
-        with patch("rocannon.schema.subprocess.run", return_value=completed):
+        with patch("rocannon.schema.ansible_runner.get_plugin_docs", return_value=(doc, "")):
             meta = fetch_module_schema("x.y.z")["meta"]
         assert meta == {}
+
+    def test_execution_environment_kwargs_forwarded(self) -> None:
+        with (
+            patch(
+                "rocannon.schema.ansible_runner.get_plugin_docs",
+                return_value=({"some.module": {}}, ""),
+            ) as mock_docs,
+            pytest.raises(SchemaFetchError, match="not present"),
+        ):
+            fetch_module_schema(
+                "ansible.builtin.ping",
+                execution_environment="some-ee:latest",
+                execution_environment_engine="docker",
+            )
+        assert mock_docs.call_args[1]["process_isolation"] is True
+        assert mock_docs.call_args[1]["process_isolation_executable"] == "docker"
+        assert mock_docs.call_args[1]["container_image"] == "some-ee:latest"
 
 
 class TestToolTags:
@@ -414,6 +439,24 @@ class TestToolTags:
 
         assert _tags_for("ansible.builtin.copy") == {"ansible.builtin", "ansible"}
         assert _tags_for("community.crypto.openssl_privatekey") == {"community.crypto", "community"}
+
+
+class TestMcpToolName:
+    """FQCNs become MCP tool names by replacing dots with underscores: MCP
+    itself allows dots, but OpenAI-style function-calling schemas require
+    ^[a-zA-Z0-9_-]+$, so a client that forwards tool names straight through to
+    an OpenAI-compatible API (Pydantic AI, most non-Claude clients) gets a 400
+    on a dotted tool name."""
+
+    def test_replaces_dots_with_underscores(self) -> None:
+        from rocannon.ansible import _mcp_tool_name
+
+        assert _mcp_tool_name("ansible.builtin.copy") == "ansible_builtin_copy"
+
+    def test_no_dots_is_a_no_op(self) -> None:
+        from rocannon.ansible import _mcp_tool_name
+
+        assert _mcp_tool_name("say_hello") == "say_hello"
 
 
 class TestFetchRoleSchemas:
@@ -432,10 +475,10 @@ class TestFetchRoleSchemas:
     }
 
     def test_parses_role_main_entry_point(self) -> None:
-        completed = MagicMock()
-        completed.returncode = 0
-        completed.stdout = json.dumps(self._ROLE_DOC)
-        with patch("rocannon.schema.subprocess.run", return_value=completed):
+        with patch(
+            "rocannon.schema.ansible_runner.get_plugin_docs",
+            return_value=(self._ROLE_DOC, ""),
+        ):
             schemas = fetch_role_schemas(["my.coll.web"])
         s = schemas["my.coll.web"]
         assert s["is_role"] is True
@@ -444,17 +487,17 @@ class TestFetchRoleSchemas:
         assert s["description"] == "Configure the web tier"
 
     def test_role_without_argspec_is_skipped(self) -> None:
-        completed = MagicMock()
-        completed.returncode = 0
-        completed.stdout = json.dumps({"my.coll.bare": {}})  # no entry_points
-        with patch("rocannon.schema.subprocess.run", return_value=completed):
+        with patch(
+            "rocannon.schema.ansible_runner.get_plugin_docs",
+            return_value=({"my.coll.bare": {}}, ""),  # no entry_points
+        ):
             schemas = fetch_role_schemas(["my.coll.bare"])
         assert schemas == {}
 
     def test_empty_input_makes_no_call(self) -> None:
-        with patch("rocannon.schema.subprocess.run") as run:
+        with patch("rocannon.schema.ansible_runner.get_plugin_docs") as mock_docs:
             assert fetch_role_schemas([]) == {}
-        run.assert_not_called()
+        mock_docs.assert_not_called()
 
     def test_only_main_entry_point_is_mapped(self) -> None:
         doc = {
@@ -465,21 +508,46 @@ class TestFetchRoleSchemas:
                 }
             }
         }
-        completed = MagicMock()
-        completed.returncode = 0
-        completed.stdout = json.dumps(doc)
-        with patch("rocannon.schema.subprocess.run", return_value=completed):
+        with patch("rocannon.schema.ansible_runner.get_plugin_docs", return_value=(doc, "")):
             s = fetch_role_schemas(["my.coll.web"])["my.coll.web"]
         # Only the main entry point's options become params; install's pkg is ignored.
         assert {p["name"] for p in s["parameters"]} == {"port"}
 
     def test_role_with_entry_points_but_no_main_is_skipped(self) -> None:
         doc = {"my.coll.x": {"entry_points": {"install": {"options": {}}}}}
-        completed = MagicMock()
-        completed.returncode = 0
-        completed.stdout = json.dumps(doc)
-        with patch("rocannon.schema.subprocess.run", return_value=completed):
+        with patch("rocannon.schema.ansible_runner.get_plugin_docs", return_value=(doc, "")):
             assert fetch_role_schemas(["my.coll.x"]) == {}
+
+    def test_roles_path_role_stays_local_even_with_execution_environment(self) -> None:
+        """A standalone role is host-local; introspecting it must never dispatch
+        into the container, since the container was never given that path."""
+        with patch(
+            "rocannon.schema.ansible_runner.get_plugin_docs",
+            return_value=(self._ROLE_DOC, ""),
+        ) as mock_docs:
+            fetch_role_schemas(
+                ["my.coll.web"],
+                roles_path="/some/local/roles",
+                execution_environment="some-ee:latest",
+            )
+        call_kwargs = mock_docs.call_args[1]
+        assert "process_isolation" not in call_kwargs
+        assert call_kwargs["envvars"] == {"ANSIBLE_ROLES_PATH": "/some/local/roles"}
+
+    def test_fqcn_role_dispatches_into_execution_environment(self) -> None:
+        with patch(
+            "rocannon.schema.ansible_runner.get_plugin_docs",
+            return_value=(self._ROLE_DOC, ""),
+        ) as mock_docs:
+            fetch_role_schemas(
+                ["my.coll.web"],
+                execution_environment="some-ee:latest",
+                execution_environment_engine="docker",
+            )
+        call_kwargs = mock_docs.call_args[1]
+        assert call_kwargs["process_isolation"] is True
+        assert call_kwargs["process_isolation_executable"] == "docker"
+        assert call_kwargs["container_image"] == "some-ee:latest"
 
 
 class TestParseRoleResult:
@@ -535,29 +603,27 @@ class TestFetchModuleSchemas:
     }
 
     def test_batches_all_modules_in_one_call(self) -> None:
-        completed = MagicMock()
-        completed.returncode = 0
-        completed.stdout = json.dumps(self._DOC)
-        with patch("rocannon.schema.subprocess.run", return_value=completed) as run:
+        with patch(
+            "rocannon.schema.ansible_runner.get_plugin_docs", return_value=(self._DOC, "")
+        ) as mock_docs:
             schemas = fetch_module_schemas(["ansible.builtin.ping", "ansible.builtin.copy"])
-        # One subprocess for both modules, not one per module.
-        assert run.call_count == 1
+        # One ansible-doc call for both modules, not one per module.
+        assert mock_docs.call_count == 1
         assert set(schemas) == {"ansible.builtin.ping", "ansible.builtin.copy"}
         assert schemas["ansible.builtin.copy"]["parameters"][0]["name"] == "dest"
 
     def test_missing_module_is_omitted_not_raised(self) -> None:
-        completed = MagicMock()
-        completed.returncode = 0
-        completed.stdout = json.dumps(self._DOC)  # no entry for the bad name
-        with patch("rocannon.schema.subprocess.run", return_value=completed):
+        with patch(
+            "rocannon.schema.ansible_runner.get_plugin_docs", return_value=(self._DOC, "")
+        ):  # no entry for the bad name
             schemas = fetch_module_schemas(["ansible.builtin.ping", "bad.module.nope"])
         assert "ansible.builtin.ping" in schemas
         assert "bad.module.nope" not in schemas
 
     def test_empty_input_makes_no_call(self) -> None:
-        with patch("rocannon.schema.subprocess.run") as run:
+        with patch("rocannon.schema.ansible_runner.get_plugin_docs") as mock_docs:
             assert fetch_module_schemas([]) == {}
-        run.assert_not_called()
+        mock_docs.assert_not_called()
 
     def test_required_parameter_flagged(self) -> None:
         doc = {
@@ -572,10 +638,7 @@ class TestFetchModuleSchemas:
                 }
             }
         }
-        completed = MagicMock()
-        completed.returncode = 0
-        completed.stdout = json.dumps(doc)
-        with patch("rocannon.schema.subprocess.run", return_value=completed):
+        with patch("rocannon.schema.ansible_runner.get_plugin_docs", return_value=(doc, "")):
             schema = fetch_module_schema("ansible.builtin.copy")
         params = {p["name"]: p for p in schema["parameters"]}
         assert params["src"]["required"] is True
@@ -598,10 +661,7 @@ class TestFetchModuleSchemas:
                 }
             }
         }
-        completed = MagicMock()
-        completed.returncode = 0
-        completed.stdout = json.dumps(doc)
-        with patch("rocannon.schema.subprocess.run", return_value=completed):
+        with patch("rocannon.schema.ansible_runner.get_plugin_docs", return_value=(doc, "")):
             schema = fetch_module_schema("ansible.builtin.file")
         state_param = schema["parameters"][0]
         assert state_param["choices"] == ["file", "directory", "absent", "touch", "link"]
@@ -623,10 +683,7 @@ class TestFetchModuleSchemas:
                 }
             }
         }
-        completed = MagicMock()
-        completed.returncode = 0
-        completed.stdout = json.dumps(doc)
-        with patch("rocannon.schema.subprocess.run", return_value=completed):
+        with patch("rocannon.schema.ansible_runner.get_plugin_docs", return_value=(doc, "")):
             schema = fetch_module_schema("ansible.builtin.copy")
         assert schema["attributes"]["check_mode"] == "full"
         assert schema["attributes"]["diff_mode"] == "partial"
@@ -1373,6 +1430,159 @@ class TestRunModule:
         assert result["status"] == "successful"
 
 
+class TestRunRoleExecutionEnvironment:
+    """run_role mirrors run_module's container dispatch (see TestRunModule* above)."""
+
+    def _role_runner(self) -> Any:
+        runner = _make_runner(events=[])
+        runner.stats = {}
+        return runner
+
+    def test_no_execution_environment_runs_local_by_default(self, tmp_path: Path) -> None:
+        with patch(
+            "rocannon.executor.ansible_runner.run", return_value=self._role_runner()
+        ) as mock_run:
+            run_role(
+                role="my_ns.my_coll.setup_web",
+                role_args={"foo": "bar"},
+                inventory=[str(tmp_path)],
+                host_pattern="localhost",
+            )
+        call_kwargs = mock_run.call_args[1]
+        assert "process_isolation" not in call_kwargs
+        assert "private_data_dir" not in call_kwargs
+        # Local runs still go through ansible-runner's own role= convenience
+        # kwarg; only the containerized path builds its own playbook.
+        assert call_kwargs["role"] == "my_ns.my_coll.setup_web"
+        assert call_kwargs["host_pattern"] == "localhost"
+        assert call_kwargs["extravars"] == {"foo": "bar"}
+        assert "playbook" not in call_kwargs
+
+    def test_execution_environment_dispatches_into_container(self, tmp_path: Path) -> None:
+        with patch(
+            "rocannon.executor.ansible_runner.run", return_value=self._role_runner()
+        ) as mock_run:
+            run_role(
+                role="my_ns.my_coll.setup_web",
+                role_args={"foo": "bar"},
+                inventory=[str(tmp_path)],
+                host_pattern="localhost",
+                execution_environment="hekaton2-ee-agent:latest",
+                execution_environment_engine="docker",
+                execution_environment_container_options=["--network", "my-net"],
+            )
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs["process_isolation"] is True
+        assert call_kwargs["process_isolation_executable"] == "docker"
+        assert call_kwargs["container_image"] == "hekaton2-ee-agent:latest"
+        assert call_kwargs["container_options"] == ["--network", "my-net"]
+        assert not Path(call_kwargs["private_data_dir"]).exists()
+
+    def test_execution_environment_builds_its_own_playbook(self, tmp_path: Path) -> None:
+        """Regression: ansible-runner's role= shim hands back a host-absolute
+        playbook path that isn't visible inside the container, so the
+        containerized path must build and write the wrapping play itself,
+        exactly like run_module, instead of using role=/host_pattern=/extravars=."""
+        captured: dict[str, Any] = {}
+
+        def fake_run(**kwargs: Any) -> Any:
+            captured["kwargs"] = kwargs
+            pdd = Path(kwargs["private_data_dir"])
+            captured["playbook_content"] = (pdd / "project" / "playbook.yml").read_text()
+            return self._role_runner()
+
+        with patch("rocannon.executor.ansible_runner.run", side_effect=fake_run):
+            run_role(
+                role="my_ns.my_coll.setup_web",
+                role_args={"port": 8080},
+                inventory=[str(tmp_path)],
+                host_pattern="webservers",
+                execution_environment="some-ee:latest",
+            )
+        call_kwargs = captured["kwargs"]
+        assert call_kwargs["playbook"] == "playbook.yml"
+        assert "role" not in call_kwargs
+        assert "host_pattern" not in call_kwargs
+        assert "extravars" not in call_kwargs
+        play = yaml.safe_load(captured["playbook_content"])
+        assert play == [
+            {
+                "hosts": "webservers",
+                "roles": [{"name": "my_ns.my_coll.setup_web", "vars": {"port": 8080}}],
+            }
+        ]
+
+    def test_execution_environment_stages_local_roles_path(self, tmp_path: Path) -> None:
+        """A standalone (non-collection) role's roles_path is host-local; it must
+        be copied into private_data_dir/project/roles, ansible-playbook's actual
+        default role search path inside the container (see the module docstring
+        on the manually-built playbook: private_data_dir/roles is only searched
+        via the ANSIBLE_ROLES_PATH env var the bypassed role= shim would set)."""
+        roles_dir = tmp_path / "roles"
+        (roles_dir / "setup_web" / "tasks").mkdir(parents=True)
+        (roles_dir / "setup_web" / "tasks" / "main.yml").write_text("- debug: msg=hi\n")
+        inv = tmp_path / "hosts.yml"
+        inv.write_text("all:\n  hosts:\n    localhost:\n")
+        captured: dict[str, Any] = {}
+
+        def fake_run(**kwargs: Any) -> Any:
+            captured["kwargs"] = kwargs
+            pdd = Path(kwargs["private_data_dir"])
+            captured["role_staged"] = (
+                pdd / "project" / "roles" / "setup_web" / "tasks" / "main.yml"
+            ).is_file()
+            return self._role_runner()
+
+        with patch("rocannon.executor.ansible_runner.run", side_effect=fake_run):
+            run_role(
+                role="setup_web",
+                role_args={},
+                inventory=[str(inv)],
+                host_pattern="localhost",
+                roles_path=str(roles_dir),
+                execution_environment="some-ee:latest",
+            )
+        assert captured["role_staged"] is True
+        assert "roles_path" not in captured["kwargs"]
+
+    def test_execution_environment_cleans_up_on_exception(self, tmp_path: Path) -> None:
+        captured: dict[str, Any] = {}
+
+        def fake_run(**kwargs: Any) -> Any:
+            captured["private_data_dir"] = kwargs["private_data_dir"]
+            raise RuntimeError("boom")
+
+        with patch("rocannon.executor.ansible_runner.run", side_effect=fake_run):
+            result = run_role(
+                role="my_ns.my_coll.setup_web",
+                role_args={},
+                inventory=[str(tmp_path)],
+                host_pattern="localhost",
+                execution_environment="some-ee:latest",
+            )
+        assert result["status"] == "error"
+        assert not Path(captured["private_data_dir"]).exists()
+
+    def test_omitted_envvars_does_not_crash_roles_path_lookup(self, tmp_path: Path) -> None:
+        """ansible-runner's role= shim does `kwargs['envvars']['ANSIBLE_ROLES_PATH'] = ...`
+        once a roles_path is set; passing envvars=None through verbatim (the
+        default for callers that don't set it) would raise a bare TypeError
+        deep inside ansible-runner instead of a normal result."""
+        roles_dir = tmp_path / "roles"
+        roles_dir.mkdir()
+        with patch(
+            "rocannon.executor.ansible_runner.run", return_value=self._role_runner()
+        ) as mock_run:
+            run_role(
+                role="setup_web",
+                role_args={},
+                inventory=[str(tmp_path)],
+                host_pattern="localhost",
+                roles_path=str(roles_dir),
+            )
+        assert mock_run.call_args[1]["envvars"] == {}
+
+
 class TestRunModuleCheckDiff:
     """check/diff become play-level keywords and mark the result."""
 
@@ -1868,18 +2078,61 @@ class TestPlaybookSerialization:
 
 
 import argparse  # noqa: E402
+import os  # noqa: E402
+import sys  # noqa: E402
 
 from rocannon.cli import (  # noqa: E402
     _add_module_param,
     _append_to_record,
     _build_module_parser,
+    _dispatch_module,
     _doctor_ansible_env,
     _doctor_env,
+    _doctor_execution_environment,
     _doctor_profile,
     _doctor_versions,
+    _isolate_real_stdin_for_stdio_transport,
     _looks_like_fqcn,
     _safe_record_name,
 )
+
+
+class TestIsolateStdinForStdioTransport:
+    """Regression: ansible-runner's subprocess/docker calls inherit fd 0 by
+    default. Over the stdio MCP transport, fd 0 IS the client's JSON-RPC pipe;
+    a slow containerized ansible-doc/-playbook call can drain bytes meant for
+    the protocol off that pipe before FastMCP's own reader ever attaches,
+    hanging the very first request with no error. See
+    _isolate_real_stdin_for_stdio_transport's docstring for the full story."""
+
+    def test_replaces_fd0_with_devnull_and_moves_real_stdin_to_sys_stdin(self) -> None:
+        original_fd = os.dup(0)
+        original_sys_stdin = sys.stdin
+        try:
+            original_stat = os.fstat(original_fd)
+            _isolate_real_stdin_for_stdio_transport()
+
+            # fd 0 itself is now devnull: any subprocess inheriting it (as
+            # ansible-runner's Popen(stdin=None) does) gets EOF immediately,
+            # never the live client pipe.
+            assert os.read(0, 1) == b""
+
+            # sys.stdin is a different, private object now, wrapping the
+            # *original* stdin (same underlying file), which is what FastMCP's
+            # stdio_server() will read from instead (it binds to
+            # sys.stdin.buffer when it starts, not to a fixed fd number).
+            assert sys.stdin is not original_sys_stdin
+            new_stat = os.fstat(sys.stdin.fileno())
+            assert (new_stat.st_dev, new_stat.st_ino) == (
+                original_stat.st_dev,
+                original_stat.st_ino,
+            )
+        finally:
+            new_stdin = sys.stdin
+            sys.stdin = original_sys_stdin
+            new_stdin.close()
+            os.dup2(original_fd, 0)
+            os.close(original_fd)
 
 
 class TestDoctorChecks:
@@ -1914,6 +2167,33 @@ class TestDoctorChecks:
         assert "AnsibleCfg" in sections
         assert "Vault" in sections
         assert "Inherited" in sections
+
+    def test_execution_environment_check_skipped_without_config(self) -> None:
+        assert _doctor_execution_environment(None) == []
+
+    def test_execution_environment_check_skipped_when_not_configured(self, tmp_path: Path) -> None:
+        inv = tmp_path / "hosts"
+        inv.write_text("[g]\nh1\n")
+        cfg = Config(inventories=[inv], modules=["ansible.builtin"])
+        assert _doctor_execution_environment(cfg) == []
+
+    def test_execution_environment_check_reports_engine_binary(self, tmp_path: Path) -> None:
+        inv = tmp_path / "hosts"
+        inv.write_text("[g]\nh1\n")
+        cfg = Config(
+            inventories=[inv],
+            modules=["ansible.builtin"],
+            execution_environment="some-ee:latest",
+            execution_environment_engine="docker",
+        )
+        with patch("rocannon.cli.shutil.which", return_value=None):
+            rows = _doctor_execution_environment(cfg)
+        assert len(rows) == 1
+        sev, section, msg = rows[0]
+        assert section == "ExecutionEnv"
+        assert sev.value == "fail"
+        assert "some-ee:latest" in msg
+        assert "docker" in msg
 
 
 class TestFqcnRouting:
@@ -2021,6 +2301,45 @@ class TestCliDryRunFlags:
     def test_check_absent_when_unsupported(self) -> None:
         with pytest.raises(SystemExit):
             self._parser("none", "none").parse_args(["--target", "h1", "--check"])
+
+
+class TestDispatchModuleExecutionEnvironment:
+    """Regression: `rocannon <fqcn> --profile ...` forwards execution_environment
+    to run_module, same as every MCP tool call site. It previously silently ran
+    modules on the local host even when the profile named a container image."""
+
+    _SCHEMA = {"name": "a.b.c", "description": "d", "parameters": []}
+
+    def test_forwards_execution_environment_from_profile(self, tmp_path: Path) -> None:
+        inv = tmp_path / "hosts"
+        inv.write_text("[g]\nh1\n")
+        profile = tmp_path / "profile.yml"
+        profile.write_text(
+            f"inventories:\n  - {inv}\n"
+            "modules:\n  - a.b.c\n"
+            "execution_environment: my-ee:latest\n"
+            "execution_environment_engine: docker\n"
+        )
+        with (
+            patch("rocannon.cli.fetch_module_schema", return_value=self._SCHEMA),
+            patch("rocannon.cli.run_module") as mock_run,
+        ):
+            mock_run.return_value = {"status": "successful", "changed": False}
+            _dispatch_module("a.b.c", ["--target", "h1", "--profile", str(profile)])
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs["execution_environment"] == "my-ee:latest"
+        assert call_kwargs["execution_environment_engine"] == "docker"
+
+    def test_no_profile_means_no_execution_environment(self, tmp_path: Path) -> None:
+        inv = tmp_path / "hosts"
+        inv.write_text("[g]\nh1\n")
+        with (
+            patch("rocannon.cli.fetch_module_schema", return_value=self._SCHEMA),
+            patch("rocannon.cli.run_module") as mock_run,
+        ):
+            mock_run.return_value = {"status": "successful", "changed": False}
+            _dispatch_module("a.b.c", ["--target", "h1", "--inventory", str(inv)])
+        assert mock_run.call_args[1]["execution_environment"] is None
 
 
 class TestAppendToRecord:

@@ -74,7 +74,7 @@ def _build_server(inv: Path, modules: list[str]) -> Any:
         "ansible.builtin.command": COMMAND_SCHEMA,
     }
 
-    def _fetch(names: list[str]) -> dict[str, Any]:
+    def _fetch(names: list[str], **_kwargs: Any) -> dict[str, Any]:
         return {n: schemas[n] for n in names if n in schemas}
 
     with patch("rocannon.ansible.fetch_module_schemas", side_effect=_fetch):
@@ -92,7 +92,7 @@ def _build_progressive(inv: Path, modules: list[str]) -> Any:
         "ansible.builtin.command": COMMAND_SCHEMA,
     }
 
-    def _fetch(names: list[str]) -> dict[str, Any]:
+    def _fetch(names: list[str], **_kwargs: Any) -> dict[str, Any]:
         return {n: schemas[n] for n in names if n in schemas}
 
     with patch("rocannon.ansible.fetch_module_schemas", side_effect=_fetch):
@@ -109,7 +109,7 @@ class TestProgressiveDiscovery:
             names = {t.name for t in await client.list_tools()}
         assert {"ansible_search_modules", "ansible_use_module"} <= names
         # The real typed module tools exist but are hidden until revealed.
-        assert "ansible.builtin.copy" not in names
+        assert "ansible_builtin_copy" not in names
 
     async def test_search_ranks_name_match_first(self, inventory_file: Path) -> None:
         server = _build_progressive(inventory_file, self.PROFILE)
@@ -122,10 +122,11 @@ class TestProgressiveDiscovery:
         async with Client(server) as client:
             u = await client.call_tool("ansible_use_module", {"module": "ansible.builtin.copy"})
             assert u.structured_content["ok"] is True
+            assert u.structured_content["tool"] == "ansible_builtin_copy"
             tools = {t.name: t for t in await client.list_tools()}
-        assert "ansible.builtin.copy" in tools
+        assert "ansible_builtin_copy" in tools
         # It is the real typed tool, not a generic wrapper: its own params are present.
-        props = set(tools["ansible.builtin.copy"].inputSchema.get("properties", {}))
+        props = set(tools["ansible_builtin_copy"].inputSchema.get("properties", {}))
         assert {"src", "dest", "target"} <= props
 
     async def test_use_module_unknown_errors(self, inventory_file: Path) -> None:
@@ -140,7 +141,7 @@ class TestProgressiveDiscovery:
             async with Client(server) as client:
                 await client.call_tool("ansible_use_module", {"module": "ansible.builtin.copy"})
                 r = await client.call_tool(
-                    "ansible.builtin.copy", {"target": "h1", "src": "a", "dest": "b"}
+                    "ansible_builtin_copy", {"target": "h1", "src": "a", "dest": "b"}
                 )
         assert mock_run.call_args[1]["module"] == "ansible.builtin.copy"
         assert mock_run.call_args[1]["module_args"] == {"src": "a", "dest": "b"}
@@ -152,7 +153,7 @@ class TestProgressiveDiscovery:
             await c1.call_tool("ansible_use_module", {"module": "ansible.builtin.copy"})
         async with Client(server) as c2:
             names = {t.name for t in await c2.list_tools()}
-        assert "ansible.builtin.copy" not in names
+        assert "ansible_builtin_copy" not in names
 
 
 class TestServerToolRegistration:
@@ -161,19 +162,19 @@ class TestServerToolRegistration:
         async with Client(server) as client:
             tools = await client.list_tools()
         names = {t.name for t in tools}
-        assert "ansible.builtin.ping" in names
+        assert "ansible_builtin_ping" in names
 
     async def test_multiple_modules_register(self, inventory_file: Path) -> None:
         server = _build_server(inventory_file, ["ansible.builtin.ping", "ansible.builtin.copy"])
         async with Client(server) as client:
             tools = await client.list_tools()
         names = {t.name for t in tools}
-        assert {"ansible.builtin.ping", "ansible.builtin.copy"} <= names
+        assert {"ansible_builtin_ping", "ansible_builtin_copy"} <= names
 
     async def test_skips_modules_whose_schema_fails(self, inventory_file: Path) -> None:
         from rocannon.server import create_server
 
-        def _fetch(names: list[str]) -> dict[str, Any]:
+        def _fetch(names: list[str], **_kwargs: Any) -> dict[str, Any]:
             # A module whose schema can't be fetched is simply omitted from the
             # batch result, exactly as a missing/unparsable module would be.
             return {n: PING_SCHEMA for n in names if n != "broken.module.x"}
@@ -187,7 +188,7 @@ class TestServerToolRegistration:
         async with Client(server) as client:
             tools = await client.list_tools()
         names = {t.name for t in tools}
-        assert "ansible.builtin.ping" in names
+        assert "ansible_builtin_ping" in names
         assert "broken.module.x" not in names
 
 
@@ -197,7 +198,7 @@ class TestServerToolInvocation:
         with patch("rocannon.ansible.run_module", return_value=_ok_result()) as mock_run:
             async with Client(server) as client:
                 result = await client.call_tool(
-                    "ansible.builtin.ping", {"target": "h1", "data": "hello"}
+                    "ansible_builtin_ping", {"target": "h1", "data": "hello"}
                 )
         assert mock_run.called
         kwargs = mock_run.call_args[1]
@@ -212,7 +213,7 @@ class TestServerToolInvocation:
         server = _build_server(inventory_file, ["ansible.builtin.ping"])
         with patch("rocannon.ansible.run_module", return_value=_ok_result()) as mock_run:
             async with Client(server) as client:
-                await client.call_tool("ansible.builtin.ping", {"target": "h1"})
+                await client.call_tool("ansible_builtin_ping", {"target": "h1"})
         # `data` had no explicit value and defaulted to None, should be excluded
         assert mock_run.call_args[1]["module_args"] == {}
 
@@ -232,7 +233,7 @@ class TestServerToolInvocation:
 
         with patch("rocannon.ansible.run_module", return_value=_ok_result()) as mock_run:
             async with Client(server) as client:
-                await client.call_tool("ansible.builtin.ping", {"target": "h1"})
+                await client.call_tool("ansible_builtin_ping", {"target": "h1"})
         assert mock_run.call_args[1]["timeout"] == 999
 
 
@@ -247,11 +248,13 @@ class TestAuditMiddleware:
 
         with patch("rocannon.ansible.run_module", return_value=_ok_result()):
             async with Client(server) as client:
-                await client.call_tool("ansible.builtin.ping", {"target": "h1"})
+                await client.call_tool("ansible_builtin_ping", {"target": "h1"})
 
         audit_records = [r for r in caplog.records if r.name == "rocannon.audit"]
         assert audit_records, "expected at least one rocannon.audit record"
         payload = json.loads(audit_records[-1].message)
+        # The audit log records the true Ansible FQCN, not the (dot-free)
+        # callable MCP tool name that was actually invoked over the wire.
         assert payload["tool"] == "ansible.builtin.ping"
         assert payload["target"] == "h1"
         assert payload["status"] == "successful"
@@ -264,13 +267,13 @@ class TestStructuredOutput:
         server = _build_server(inventory_file, ["ansible.builtin.ping"])
         async with Client(server) as client:
             tools = {t.name: t for t in await client.list_tools()}
-        assert tools["ansible.builtin.ping"].outputSchema is not None
+        assert tools["ansible_builtin_ping"].outputSchema is not None
 
     async def test_result_is_structured_content(self, inventory_file: Path) -> None:
         server = _build_server(inventory_file, ["ansible.builtin.ping"])
         with patch("rocannon.ansible.run_module", return_value=_ok_result()):
             async with Client(server) as client:
-                result = await client.call_tool("ansible.builtin.ping", {"target": "h1"})
+                result = await client.call_tool("ansible_builtin_ping", {"target": "h1"})
         assert result.structured_content == _ok_result()
         # The text block stays valid JSON so existing string-parsing clients work.
         assert json.loads(result.content[0].text)["status"] == "successful"
@@ -281,13 +284,13 @@ class TestToolAnnotations:
         server = _build_server(inventory_file, ["ansible.builtin.ping"])
         async with Client(server) as client:
             tools = {t.name: t for t in await client.list_tools()}
-        assert tools["ansible.builtin.ping"].annotations.readOnlyHint is True
+        assert tools["ansible_builtin_ping"].annotations.readOnlyHint is True
 
     async def test_raw_family_module_flagged_destructive(self, inventory_file: Path) -> None:
         server = _build_server(inventory_file, ["ansible.builtin.command"])
         async with Client(server) as client:
             tools = {t.name: t for t in await client.list_tools()}
-        annotations = tools["ansible.builtin.command"].annotations
+        annotations = tools["ansible_builtin_command"].annotations
         assert annotations.destructiveHint is True
         assert annotations.openWorldHint is True
 
@@ -298,7 +301,7 @@ class TestDryRunPassThrough:
         with patch("rocannon.ansible.run_module", return_value=_ok_result()) as mock_run:
             async with Client(server) as client:
                 await client.call_tool(
-                    "ansible.builtin.command",
+                    "ansible_builtin_command",
                     {"target": "h1", "cmd": "id", "check": True},
                 )
         kwargs = mock_run.call_args[1]
@@ -336,10 +339,27 @@ class TestLivePlaybookPrompts:
         server = _build_server(inventory_file, ["ansible.builtin.ping"])
         with patch("rocannon.ansible.run_module", return_value=_ok_result()):
             async with Client(server) as client:
-                await client.call_tool("ansible.builtin.ping", {"target": "h1"})
+                await client.call_tool("ansible_builtin_ping", {"target": "h1"})
                 res = await client.call_tool("commit_session", {"name": "sess2"})
                 assert res.structured_content["ok"] is True
                 assert "playbook_sess2" in {p.name for p in await client.list_prompts()}
+
+    async def test_commit_session_records_true_fqcn_not_mcp_tool_name(
+        self, inventory_file: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression: the MCP-callable tool name is the underscored form
+        (ansible_builtin_ping), but a committed playbook step must use the real
+        Ansible FQCN (ansible.builtin.ping) to round-trip as valid playbook YAML."""
+        monkeypatch.setenv("ROCANNON_DATA_DIR", str(tmp_path))
+        server = _build_server(inventory_file, ["ansible.builtin.ping"])
+        with patch("rocannon.ansible.run_module", return_value=_ok_result()):
+            async with Client(server) as client:
+                await client.call_tool("ansible_builtin_ping", {"target": "h1"})
+                res = await client.call_tool("commit_session", {"name": "sess3"})
+        assert res.structured_content["ok"] is True
+        saved_yaml = Path(res.structured_content["path"]).read_text()
+        assert "ansible.builtin.ping" in saved_yaml
+        assert "ansible_builtin_ping" not in saved_yaml
 
 
 class TestDiscoveryResources:

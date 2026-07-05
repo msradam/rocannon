@@ -23,6 +23,7 @@ try:
 except ImportError:
     _tracer = None
 
+from rocannon.ansible import _mcp_tool_name
 from rocannon.config import Config
 from rocannon.correlation import (
     init_call_metadata,
@@ -92,11 +93,21 @@ class _AuditMiddleware(Middleware):
         try:
             with span_cm as span:
                 if span is not None:
-                    span.set_attribute("ansible.module", tool_name)
                     span.set_attribute("ansible.target", target)
                     span.set_attribute("rocannon.request_id", request_id)
 
                 result = await call_next(context)
+
+                # The MCP-protocol tool name is the OpenAI-function-calling-safe
+                # form (dots replaced with underscores; see _mcp_tool_name), but
+                # audit/history/playbook recording need the real Ansible FQCN so
+                # a committed session replays as a real, runnable playbook. The
+                # Ansible tool fn stashes it in per-call metadata; meta-tools
+                # (save_playbook, commit_session, ...) don't set it and fall
+                # back to their own already-clean protocol name.
+                recorded_tool = str(meta.get("fqcn") or tool_name)
+                if span is not None:
+                    span.set_attribute("ansible.module", recorded_tool)
 
                 elapsed_ms = int((time.monotonic() - start) * 1000)
                 if span is not None:
@@ -111,7 +122,7 @@ class _AuditMiddleware(Middleware):
                     json.dumps(
                         {
                             "request_id": request_id,
-                            "tool": tool_name,
+                            "tool": recorded_tool,
                             "target": target,
                             "latency_ms": elapsed_ms,
                             "status": status,
@@ -125,7 +136,7 @@ class _AuditMiddleware(Middleware):
                 self._history.record(
                     HistoryEntry(
                         request_id=request_id,
-                        tool=tool_name,
+                        tool=recorded_tool,
                         target=target,
                         status=status,
                         latency_ms=elapsed_ms,
@@ -444,7 +455,9 @@ def _playbook_prompt_body(pb: Playbook) -> str:
     )
     lines.append("")
     for i, step in enumerate(pb.steps, 1):
-        lines.append(f"Step {i}: call tool `{step.tool}` with arguments:")
+        # step.tool is the real Ansible FQCN (needed to round-trip as valid
+        # playbook YAML); the callable MCP tool name is the underscored form.
+        lines.append(f"Step {i}: call tool `{_mcp_tool_name(step.tool)}` with arguments:")
         if step.args:
             for k, v in step.args.items():
                 lines.append(f"  {k} = {json.dumps(v, default=str)}")
@@ -525,9 +538,12 @@ def _add_save_tools(
         name="save_playbook",
         description=(
             "Save a named playbook to .rocannon/playbooks/<name>.yml. "
-            "Each step is {tool, args}. The playbook will be available as an "
-            "MCP prompt on the next server start. Refuses overwrite unless "
-            "overwrite=True."
+            "Each step is {tool, args}, where 'tool' is the Ansible module or "
+            "role FQCN (e.g. ansible.builtin.copy), not the callable MCP tool "
+            "name (e.g. ansible_builtin_copy). Prefer commit_session, which "
+            "records this correctly from the actual call history. The playbook "
+            "will be available as an MCP prompt on the next server start. "
+            "Refuses overwrite unless overwrite=True."
         ),
         tags={"rocannon.meta"},
     )

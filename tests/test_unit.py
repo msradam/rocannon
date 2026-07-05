@@ -47,6 +47,7 @@ from rocannon.schema import (
     fetch_module_schema,
     fetch_module_schemas,
     fetch_role_schemas,
+    list_all_modules,
 )
 
 # ---------------------------------------------------------------------------
@@ -277,6 +278,40 @@ SAMPLE_MODULE_LIST = {
     "ansible.builtin.copy": "Copy files",
     "ibm.ibm_zos_core.zos_ping": "z/OS ping",
 }
+
+
+class TestListAllModules:
+    """The shared ansible-doc --list wrapper behind expand_modules and the
+    search CLI command."""
+
+    def test_returns_name_to_description_mapping(self) -> None:
+        with patch(
+            "rocannon.schema.ansible_runner.get_plugin_list",
+            return_value=(SAMPLE_MODULE_LIST, ""),
+        ):
+            result = list_all_modules()
+        assert result == SAMPLE_MODULE_LIST
+
+    def test_raises_schema_fetch_error_on_failure(self) -> None:
+        with (
+            patch(
+                "rocannon.schema.ansible_runner.get_plugin_list",
+                return_value=("", "ansible-doc: command not found"),
+            ),
+            pytest.raises(SchemaFetchError, match="ansible-doc --list failed"),
+        ):
+            list_all_modules()
+
+    def test_forwards_execution_environment_kwargs(self) -> None:
+        with patch(
+            "rocannon.schema.ansible_runner.get_plugin_list", return_value=({}, "")
+        ) as mock_list:
+            list_all_modules(
+                execution_environment="some-ee:latest",
+                execution_environment_engine="docker",
+            )
+        assert mock_list.call_args[1]["process_isolation"] is True
+        assert mock_list.call_args[1]["container_image"] == "some-ee:latest"
 
 
 class TestExpandModules:
@@ -2340,6 +2375,72 @@ class TestDispatchModuleExecutionEnvironment:
             mock_run.return_value = {"status": "successful", "changed": False}
             _dispatch_module("a.b.c", ["--target", "h1", "--inventory", str(inv)])
         assert mock_run.call_args[1]["execution_environment"] is None
+
+
+class TestDocSearchExecutionEnvironment:
+    """Regression: `rocannon doc`/`rocannon search` never forwarded --profile's
+    execution_environment at all (no --profile option existed on either), so
+    they always introspected the local host even against an EE profile."""
+
+    def _profile(self, tmp_path: Path) -> Path:
+        inv = tmp_path / "hosts"
+        inv.write_text("[g]\nh1\n")
+        profile = tmp_path / "profile.yml"
+        profile.write_text(
+            f"inventories:\n  - {inv}\n"
+            "modules:\n  - a.b.c\n"
+            "execution_environment: my-ee:latest\n"
+            "execution_environment_engine: docker\n"
+        )
+        return profile
+
+    def test_doc_forwards_execution_environment_from_profile(self, tmp_path: Path) -> None:
+        from typer.testing import CliRunner
+
+        from rocannon.cli import app
+
+        profile = self._profile(tmp_path)
+        schema = {"name": "a.b.c", "description": "d", "parameters": []}
+        with patch("rocannon.cli.fetch_module_schema", return_value=schema) as mock_fetch:
+            result = CliRunner().invoke(app, ["doc", "a.b.c", "--profile", str(profile)])
+        assert result.exit_code == 0, result.output
+        call_kwargs = mock_fetch.call_args[1]
+        assert call_kwargs["execution_environment"] == "my-ee:latest"
+        assert call_kwargs["execution_environment_engine"] == "docker"
+
+    def test_doc_without_profile_forwards_nothing(self) -> None:
+        from typer.testing import CliRunner
+
+        from rocannon.cli import app
+
+        schema = {"name": "a.b.c", "description": "d", "parameters": []}
+        with patch("rocannon.cli.fetch_module_schema", return_value=schema) as mock_fetch:
+            result = CliRunner().invoke(app, ["doc", "a.b.c"])
+        assert result.exit_code == 0, result.output
+        assert mock_fetch.call_args[1]["execution_environment"] is None
+
+    def test_search_forwards_execution_environment_from_profile(self, tmp_path: Path) -> None:
+        from typer.testing import CliRunner
+
+        from rocannon.cli import app
+
+        profile = self._profile(tmp_path)
+        with patch("rocannon.cli.list_all_modules", return_value={"a.b.c": "d"}) as mock_list:
+            result = CliRunner().invoke(app, ["search", "a.b", "--profile", str(profile)])
+        assert result.exit_code == 0, result.output
+        call_kwargs = mock_list.call_args[1]
+        assert call_kwargs["execution_environment"] == "my-ee:latest"
+        assert call_kwargs["execution_environment_engine"] == "docker"
+
+    def test_search_without_profile_forwards_nothing(self) -> None:
+        from typer.testing import CliRunner
+
+        from rocannon.cli import app
+
+        with patch("rocannon.cli.list_all_modules", return_value={"a.b.c": "d"}) as mock_list:
+            result = CliRunner().invoke(app, ["search", "a.b"])
+        assert result.exit_code == 0, result.output
+        assert mock_list.call_args[1]["execution_environment"] is None
 
 
 class TestAppendToRecord:

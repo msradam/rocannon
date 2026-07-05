@@ -35,7 +35,12 @@ from rocannon.profiles import (
     load_profile_registry,
     single_profile_registry,
 )
-from rocannon.schema import SchemaFetchError, expand_modules, fetch_module_schema
+from rocannon.schema import (
+    SchemaFetchError,
+    expand_modules,
+    fetch_module_schema,
+    list_all_modules,
+)
 from rocannon.server import create_server
 
 app = typer.Typer(
@@ -655,10 +660,23 @@ def doc(
     as_json: Annotated[
         bool, typer.Option("--json", help="Emit raw JSON instead of pretty text.")
     ] = False,
+    profile: Annotated[str | None, _PROFILE_OPT] = None,
 ) -> None:
-    """Print the parsed schema for an Ansible module (the same shape FastMCP sees)."""
+    """Print the parsed schema for an Ansible module (the same shape FastMCP sees).
+
+    Pass --profile to read it through that profile's execution_environment, so
+    the schema matches a module that only lives in an image, not locally.
+    """
+    cfg = _build_config([], [], profile, "stdio") if profile else None
     try:
-        schema = fetch_module_schema(module)
+        schema = fetch_module_schema(
+            module,
+            execution_environment=cfg.execution_environment if cfg else None,
+            execution_environment_engine=cfg.execution_environment_engine if cfg else "podman",
+            execution_environment_container_options=(
+                cfg.execution_environment_container_options if cfg else None
+            ),
+        )
     except SchemaFetchError as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=2) from exc
@@ -789,26 +807,24 @@ def search(
         str, typer.Argument(help="Substring to match in module names or descriptions.")
     ],
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max results.")] = 20,
+    profile: Annotated[str | None, _PROFILE_OPT] = None,
 ) -> None:
-    """Search Ansible modules by name or description (substring, case-insensitive)."""
-    try:
-        proc = subprocess.run(
-            ["ansible-doc", "--list", "--type", "module", "-j"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-    except FileNotFoundError as exc:
-        typer.echo("error: ansible-doc not found on PATH", err=True)
-        raise typer.Exit(code=2) from exc
-    if proc.returncode != 0:
-        typer.echo(f"error: ansible-doc failed: {proc.stderr.strip()}", err=True)
-        raise typer.Exit(code=2)
+    """Search Ansible modules by name or description (substring, case-insensitive).
 
+    Pass --profile to search that profile's execution_environment image
+    instead of whatever is installed locally.
+    """
+    cfg = _build_config([], [], profile, "stdio") if profile else None
     try:
-        all_modules: dict[str, str] = json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        typer.echo(f"error: bad JSON from ansible-doc: {exc}", err=True)
+        all_modules = list_all_modules(
+            execution_environment=cfg.execution_environment if cfg else None,
+            execution_environment_engine=cfg.execution_environment_engine if cfg else "podman",
+            execution_environment_container_options=(
+                cfg.execution_environment_container_options if cfg else None
+            ),
+        )
+    except SchemaFetchError as exc:
+        typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=2) from exc
 
     pattern = re.compile(re.escape(query), re.IGNORECASE)

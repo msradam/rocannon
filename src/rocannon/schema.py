@@ -54,6 +54,33 @@ def _ee_kwargs(
     }
 
 
+def list_all_modules(
+    execution_environment: str | None = None,
+    execution_environment_engine: str = "podman",
+    execution_environment_container_options: list[str] | None = None,
+) -> dict[str, str]:
+    """List every module ansible-doc knows about, name -> short description.
+
+    Raises ``SchemaFetchError`` on failure; callers with a sensible fallback
+    (``expand_modules``) catch it, callers without one (the ``search`` CLI
+    command) let it propagate.
+    """
+    ee_kwargs = _ee_kwargs(
+        execution_environment, execution_environment_engine, execution_environment_container_options
+    )
+    try:
+        all_modules, error = ansible_runner.get_plugin_list(
+            response_format="json", plugin_type="module", quiet=True, **ee_kwargs
+        )
+    except json.JSONDecodeError as exc:
+        raise SchemaFetchError(f"ansible-doc --list returned unparsable JSON: {exc}") from exc
+
+    if not isinstance(all_modules, dict):
+        raise SchemaFetchError(f"ansible-doc --list failed: {(error or 'no output').strip()}")
+
+    return all_modules
+
+
 def expand_modules(
     specs: list[str],
     execution_environment: str | None = None,
@@ -73,24 +100,14 @@ def expand_modules(
     if not prefixes:
         return explicit
 
-    ee_kwargs = _ee_kwargs(
-        execution_environment, execution_environment_engine, execution_environment_container_options
-    )
     try:
-        all_modules, error = ansible_runner.get_plugin_list(
-            response_format="json", plugin_type="module", quiet=True, **ee_kwargs
+        all_modules = list_all_modules(
+            execution_environment,
+            execution_environment_engine,
+            execution_environment_container_options,
         )
-    except json.JSONDecodeError as exc:
-        logger.error(
-            "ansible-doc --list returned unparsable JSON: %s, returning explicit modules only", exc
-        )
-        return explicit
-
-    if not isinstance(all_modules, dict):
-        logger.error(
-            "ansible-doc --list failed: %s, returning explicit modules only",
-            (error or "no output").strip(),
-        )
+    except SchemaFetchError as exc:
+        logger.error("%s, returning explicit modules only", exc)
         return explicit
 
     expanded: list[str] = explicit.copy()

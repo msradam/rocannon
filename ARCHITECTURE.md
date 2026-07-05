@@ -204,6 +204,25 @@ stream.
 `execution_environment` is set, so a misconfigured engine fails fast and
 legibly instead of surfacing as an opaque `ansible-runner` exception mid-call.
 
+**Cost, and a considered alternative.** Every containerized module or role
+call is its own `docker/podman run --rm`, ansible-runner hardcodes `--rm`
+into its own container-wrapping logic, so there is no reuse across calls.
+Measured on this project's own dogfood image: roughly 0.9-1.0s fixed
+overhead per call, falling to ~0.1-0.15s per task once amortized across
+tasks that share one container. That per-call cost matches how AWX itself
+works (a job, one whole playbook, gets one container; AWX's throughput
+comes from running many jobs across many execution nodes, not from reusing
+one container across separate jobs), so this isn't rocannon falling short
+of an established pattern. A batched-execution tool, reusing
+`Playbook`/`PlaybookStep`'s existing `{tool, args}` shape to run several
+steps as one multi-task playbook in one container, was designed and
+benchmarked (2-5x faster at 3-10 steps) but deliberately not built: at
+typical agent-session call counts the absolute cost is already small next
+to LLM turn latency, and the tool would only help for steps an agent can
+plan before seeing any of their results, reactive sequences ("check X,
+then decide") can't batch by construction. Revisit if someone hits a real
+throughput wall (bulk/fleet-style runs with many steps decided up front).
+
 ## ansible-doc to MCP field mapping
 
 Every label on a tool is a deterministic translation of an `ansible-doc` field.

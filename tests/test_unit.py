@@ -207,6 +207,23 @@ class TestLoadInventory:
         assert result["hosts"] == ["host1", "host2"]
         assert result["groups"] == ["linuxone"]
 
+    def test_includes_hosts_without_vars(self) -> None:
+        # ansible-inventory omits variable-free hosts from _meta.hostvars,
+        # so hosts must come from each group's own hosts list.
+        completed = MagicMock()
+        completed.returncode = 0
+        completed.stdout = json.dumps(
+            {
+                "_meta": {"hostvars": {}},
+                "all": {"children": ["ungrouped", "db"]},
+                "db": {"hosts": ["db1"]},
+                "ungrouped": {"hosts": ["web1", "web2"]},
+            }
+        )
+        with patch("rocannon.inventory.subprocess.run", return_value=completed):
+            result = load_inventory([Path("/inv.yml")])
+        assert result["hosts"] == ["db1", "web1", "web2"]
+
     def test_filters_meta_all_ungrouped(self) -> None:
         completed = MagicMock()
         completed.returncode = 0

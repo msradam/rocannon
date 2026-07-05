@@ -31,7 +31,9 @@ def load_inventory(paths: list[Path]) -> dict[str, list[str]]:
         logger.error("Failed to parse ansible-inventory output: %s", exc)
         return {"hosts": [], "groups": []}
 
-    hosts = sorted(data.get("_meta", {}).get("hostvars", {}).keys())
+    hosts = sorted(
+        {host for key, group in data.items() if key != "_meta" for host in group.get("hosts", [])}
+    )
     groups = sorted(
         k for k in data if k not in ("_meta", "all", "ungrouped") and data[k].get("hosts")
     )

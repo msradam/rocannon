@@ -578,6 +578,25 @@ Things that surprised the author while building this:
   `mcp`-SDK-based stdio client) needs to pass `TMPDIR` (see above) and any
   other rocannon-relevant env vars explicitly via that transport's `env=`
   parameter; it will not simply inherit them.
+- **A native macOS `SSH_AUTH_SOCK` breaks podman specifically, not docker.**
+  `ansible-runner`'s own automount feature (`_handle_automounts` in
+  `ansible_runner/config/_base.py`, unconditional, not something rocannon
+  calls or can disable) bind-mounts `$SSH_AUTH_SOCK`'s directory into any
+  containerized run whenever the host has that env var set and the path
+  exists. On macOS the default is a launchd-managed path
+  (`/var/run/com.apple.launchd.<hash>/`) that was never shared into a podman
+  machine's virtiofs mounts, so `podman run -v` fails outright with a
+  `statfs: no such file or directory` before the container even starts;
+  Docker/Colima tolerates the same unmounted source path without erroring.
+  This is a genuine engine behavior difference, verified by unsetting
+  `SSH_AUTH_SOCK` for the call and confirming both discovery and execution
+  work identically to docker once it's out of the way; nothing to fix on
+  rocannon's side, since the mount request never touches rocannon's code.
+  Also worth knowing when setting up podman on macOS at all: recent
+  `podman machine` defaults to the `libkrun` provider, which additionally
+  needs the third-party `krunkit` binary; `applehv` (Apple's own
+  Virtualization Framework, `CONTAINERS_MACHINE_PROVIDER=applehv`) needs no
+  extra tap and has more reliable bind-mount semantics besides.
 
 ## Where to start when debugging
 

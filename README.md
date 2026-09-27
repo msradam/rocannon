@@ -95,6 +95,9 @@ rocannon repl       --profile .rocannon/quickstart.yml   # operator shell
 - [`examples/execution-environment-dispatch`](examples/execution-environment-dispatch/):
   the opposite shape, Rocannon stays on the control host and dispatches each
   module call into a plain EE image instead.
+- [`examples/grafana-assistant`](examples/grafana-assistant/): Rocannon as a
+  remote MCP server for Grafana Assistant, over HTTP with a bearer token, so
+  Assistant can diagnose and fix a broken service on a real host.
 
 ## Profiles
 

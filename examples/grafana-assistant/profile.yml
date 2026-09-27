@@ -1,0 +1,15 @@
+# Grafana Assistant demo profile. run.sh fills in the inventory path.
+#
+# The module list is the guardrail: Assistant can inspect the host and start
+# or restart services, and nothing else. No shell, no file writes.
+
+inventories:
+  - __INVENTORY__
+
+modules:
+  - ansible.builtin.ping
+  - ansible.builtin.setup
+  - ansible.builtin.service_facts
+  - ansible.builtin.service
+  - ansible.builtin.command
+  - ansible.builtin.uri

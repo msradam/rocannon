@@ -67,7 +67,8 @@
         <h2>rocannon mcp serve</h2>
         <p>Start the MCP server. This is the command your MCP client runs.</p>
         <pre class="lk-code"><code>rocannon mcp serve [--profile PROF] [--inventory INV] [--modules MOD]
-                  [--transport stdio|http] [--log-level LEVEL]</code></pre>
+                  [--transport stdio|http] [--host ADDR] [--port N]
+                  [--log-level LEVEL]</code></pre>
         <table class="lk-table flag-table">
           <thead><tr><th>Flag</th><th>Default</th><th>Description</th></tr></thead>
           <tbody>
@@ -75,6 +76,8 @@
             <tr><td><code class="lk-code-inline">--inventory / -i</code></td><td>—</td><td>Inventory file (repeatable). Alternative to --profile.</td></tr>
             <tr><td><code class="lk-code-inline">--modules / -m</code></td><td>—</td><td>Module/collection/namespace spec (repeatable)</td></tr>
             <tr><td><code class="lk-code-inline">--transport</code></td><td><code class="lk-code-inline">stdio</code></td><td><code class="lk-code-inline">stdio</code> for MCP clients; <code class="lk-code-inline">http</code> for HTTP/SSE transport</td></tr>
+            <tr><td><code class="lk-code-inline">--host</code></td><td><code class="lk-code-inline">127.0.0.1</code></td><td>HTTP bind address. A non-loopback address requires <code class="lk-code-inline">ROCANNON_HTTP_TOKEN</code>.</td></tr>
+            <tr><td><code class="lk-code-inline">--port</code></td><td><code class="lk-code-inline">8000</code></td><td>HTTP port</td></tr>
             <tr><td><code class="lk-code-inline">--log-level</code></td><td><code class="lk-code-inline">INFO</code></td><td><code class="lk-code-inline">DEBUG</code> / <code class="lk-code-inline">INFO</code> / <code class="lk-code-inline">WARNING</code> / <code class="lk-code-inline">ERROR</code></td></tr>
           </tbody>
         </table>
@@ -88,6 +91,7 @@
             <tr><td><code class="lk-code-inline">ROCANNON_MAX_CONCURRENT_PER_HOST</code></td><td>3</td><td>Per-host concurrent cap</td></tr>
             <tr><td><code class="lk-code-inline">ROCANNON_MAX_RESPONSE_BYTES</code></td><td>1 000 000</td><td>Max response size before truncation</td></tr>
             <tr><td><code class="lk-code-inline">ROCANNON_LOG_FORMAT</code></td><td>text</td><td>Set to <code class="lk-code-inline">json</code> for structured JSON logs</td></tr>
+            <tr><td><code class="lk-code-inline">ROCANNON_HTTP_TOKEN</code></td><td>unset</td><td>With <code class="lk-code-inline">--transport http</code>, require <code class="lk-code-inline">Authorization: Bearer &lt;token&gt;</code> on every request</td></tr>
             <tr><td><code class="lk-code-inline">ROCANNON_DATA_DIR</code></td><td>CWD</td><td>Root for <code class="lk-code-inline">.rocannon/playbooks/</code> writes</td></tr>
           </tbody>
         </table>

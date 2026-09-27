@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import hmac
 import json
 import logging
 import os
@@ -7,6 +8,7 @@ import time
 from typing import Any
 
 from fastmcp import FastMCP
+from fastmcp.server.auth import AccessToken, TokenVerifier
 from fastmcp.server.context import Context
 from fastmcp.server.middleware import Middleware, MiddlewareContext, PingMiddleware
 from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware, RetryMiddleware
@@ -183,6 +185,19 @@ class _ConcurrencyMiddleware(Middleware):
 
 
 audit_logger = logging.getLogger("rocannon.audit")
+
+
+class BearerTokenVerifier(TokenVerifier):
+    """Accept exactly one shared bearer token on the HTTP transport."""
+
+    def __init__(self, token: str) -> None:
+        super().__init__()
+        self._token = token.encode()
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        if hmac.compare_digest(token.encode(), self._token):
+            return AccessToken(token=token, client_id="rocannon", scopes=[])
+        return None
 
 
 def create_server(

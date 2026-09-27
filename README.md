@@ -229,6 +229,16 @@ A working `.mcp.json` ships at the repo root; per-client snippets are in
 All use the standard `mcpServers` envelope pointing at
 `rocannon mcp serve --profile <your-profile.yml>`.
 
+For clients that connect over the network instead of launching a process, serve
+over HTTP. Set `ROCANNON_HTTP_TOKEN` and every request must carry
+`Authorization: Bearer <token>`. Rocannon refuses to bind a non-loopback
+`--host` without a token.
+
+```bash
+ROCANNON_HTTP_TOKEN=... rocannon mcp serve --transport http --host 0.0.0.0 --port 8000 \
+    --profile my-profile.yml
+```
+
 ## Development
 
 ```bash

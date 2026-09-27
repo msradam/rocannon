@@ -397,3 +397,61 @@ class TestDiscoveryResources:
             contents = await client.read_resource("rocannon://playbooks")
         data = json.loads(contents[0].text)
         assert any(pb["name"] == "rb1" for pb in data)
+
+
+class TestHttpBearerAuth:
+    _INIT = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "t", "version": "0"},
+        },
+    }
+    _HEADERS = {"Accept": "application/json, text/event-stream"}
+
+    def _post(self, inventory_file: Path, headers: dict[str, str]) -> int:
+        from starlette.testclient import TestClient
+
+        from rocannon.server import BearerTokenVerifier
+
+        server = _build_server(inventory_file, ["ansible.builtin.ping"])
+        server.auth = BearerTokenVerifier("s3cret")
+        with TestClient(server.http_app()) as http:
+            resp = http.post("/mcp", json=self._INIT, headers={**self._HEADERS, **headers})
+            return resp.status_code
+
+    def test_missing_token_rejected(self, inventory_file: Path) -> None:
+        assert self._post(inventory_file, {}) == 401
+
+    def test_wrong_token_rejected(self, inventory_file: Path) -> None:
+        assert self._post(inventory_file, {"Authorization": "Bearer nope"}) == 401
+
+    def test_right_token_accepted(self, inventory_file: Path) -> None:
+        assert self._post(inventory_file, {"Authorization": "Bearer s3cret"}) == 200
+
+    def test_non_loopback_without_token_refused(
+        self, inventory_file: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from typer.testing import CliRunner
+
+        from rocannon.cli import app
+
+        monkeypatch.delenv("ROCANNON_HTTP_TOKEN", raising=False)
+        result = CliRunner().invoke(
+            app,
+            [
+                "mcp",
+                "serve",
+                "--transport",
+                "http",
+                "--host",
+                "10.0.0.5",
+                "-i",
+                str(inventory_file),
+            ],
+        )
+        assert result.exit_code != 0
+        assert "ROCANNON_HTTP_TOKEN" in result.output

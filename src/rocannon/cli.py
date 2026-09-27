@@ -41,7 +41,7 @@ from rocannon.schema import (
     fetch_module_schema,
     list_all_modules,
 )
-from rocannon.server import create_server
+from rocannon.server import BearerTokenVerifier, create_server
 
 app = typer.Typer(
     name="rocannon",
@@ -258,15 +258,32 @@ def _start_server(
     profile: str | None,
     transport: Transport,
     log_level: LogLevel,
+    host: str = "127.0.0.1",
+    port: int = 8000,
 ) -> None:
     _setup_logging(log_level)
     if transport is Transport.stdio:
         _isolate_real_stdin_for_stdio_transport()
+    # Read from the environment, not a flag, so the token stays out of `ps`.
+    token = os.environ.get("ROCANNON_HTTP_TOKEN", "")
+    if transport is Transport.http and not token and host not in _LOOPBACK_HOSTS:
+        raise typer.BadParameter(
+            f"--host {host} exposes Ansible to the network without auth. "
+            "Set ROCANNON_HTTP_TOKEN, or bind to 127.0.0.1."
+        )
     registry, active = _resolve_profile_source(
         list(inventories or []), list(modules or []), profile, transport.value
     )
     server = create_server(registry, active_name=active)
-    server.run(transport=transport.value)
+    if transport is Transport.stdio:
+        server.run(transport="stdio")
+        return
+    if token:
+        server.auth = BearerTokenVerifier(token)
+    server.run(transport="http", host=host, port=port)
+
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 _INV_OPT = typer.Option(
@@ -311,9 +328,18 @@ def mcp_serve(
     log_level: Annotated[
         LogLevel, typer.Option("--log-level", help="Logging level.")
     ] = LogLevel.INFO,
+    host: Annotated[
+        str,
+        typer.Option(help="HTTP bind address. Non-loopback addresses require ROCANNON_HTTP_TOKEN."),
+    ] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="HTTP port.")] = 8000,
 ) -> None:
-    """Start the Rocannon MCP server."""
-    _start_server(inventories, modules, profile, transport, log_level)
+    """Start the Rocannon MCP server.
+
+    With --transport http, set ROCANNON_HTTP_TOKEN to require
+    `Authorization: Bearer <token>` on every request.
+    """
+    _start_server(inventories, modules, profile, transport, log_level, host, port)
 
 
 @mcp_app.command(name="doctor")
